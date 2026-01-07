@@ -15,6 +15,13 @@ type ProgramInfo = {
 };
 
 type ParamValues = Record<string, number>;
+type StatefulResources = {
+  size: number;
+  textures: [WebGLTexture, WebGLTexture];
+  fbos: [WebGLFramebuffer, WebGLFramebuffer];
+  index: number;
+  needsInit: boolean;
+};
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
@@ -107,6 +114,9 @@ if (!gl) {
   throw new Error("WebGL2 unavailable");
 }
 
+const floatRenderExt = gl.getExtension("EXT_color_buffer_float");
+const supportsFloatTargets = !!floatRenderExt;
+
 gl.disable(gl.DEPTH_TEST);
 gl.disable(gl.BLEND);
 
@@ -115,6 +125,7 @@ const programById = new Map<string, ProgramInfo>();
 const paramSpecById: Record<string, Record<string, ParamSpec>> = {};
 const stateByAnimation: Record<string, ParamValues> = {};
 const defaultByAnimation: Record<string, ParamValues> = {};
+const statefulById = new Map<string, StatefulResources>();
 
 for (const animation of animations) {
   const program = createProgram(gl, vertexSource, animation.fragment);
@@ -123,6 +134,11 @@ for (const animation of animations) {
   uniformNames.add(animation.timeUniform);
   if (animation.loopUniform) {
     uniformNames.add(animation.loopUniform);
+  }
+  if (animation.stateful) {
+    uniformNames.add(animation.passUniform ?? "uPass");
+    uniformNames.add(animation.stateUniform ?? "uState");
+    uniformNames.add(animation.gridUniform ?? "uGridSize");
   }
   for (const param of animation.params) {
     uniformNames.add(param.uniform);
@@ -149,6 +165,74 @@ let activeControls: Record<
 > = {};
 let uiHidden = false;
 let startTime = performance.now();
+
+function createStateTexture(size: number) {
+  const texture = gl.createTexture();
+  if (!texture) {
+    throw new Error("Failed to create state texture");
+  }
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA16F,
+    size,
+    size,
+    0,
+    gl.RGBA,
+    gl.HALF_FLOAT,
+    null,
+  );
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return texture;
+}
+
+function createStateResources(size: number): StatefulResources {
+  const texA = createStateTexture(size);
+  const texB = createStateTexture(size);
+  const fbA = gl.createFramebuffer();
+  const fbB = gl.createFramebuffer();
+  if (!fbA || !fbB) {
+    throw new Error("Failed to create framebuffer");
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbA);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texA, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbB);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texB, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+  return {
+    size,
+    textures: [texA, texB],
+    fbos: [fbA, fbB],
+    index: 0,
+    needsInit: true,
+  };
+}
+
+function getStateResources(animation: AnimationConfig) {
+  if (!animation.stateful) {
+    return null;
+  }
+  let existing = statefulById.get(animation.id);
+  const size = animation.bufferSize ?? 192;
+  if (!existing || existing.size !== size) {
+    existing = createStateResources(size);
+    statefulById.set(animation.id, existing);
+  }
+  return existing;
+}
+
+function markStateNeedsInit(animationId: string) {
+  const state = statefulById.get(animationId);
+  if (state) {
+    state.needsInit = true;
+  }
+}
 
 function clampValue(param: ParamSpec, value: number) {
   let next = value;
@@ -218,6 +302,7 @@ function reseed(animationId: string) {
       setParamValue(animationId, param.id, Math.floor(Math.random() * 1_000_000));
     }
   }
+  markStateNeedsInit(animationId);
 }
 
 function resetParams(animationId: string) {
@@ -225,6 +310,7 @@ function resetParams(animationId: string) {
   for (const [paramId, value] of Object.entries(defaults)) {
     setParamValue(animationId, paramId, value, true);
   }
+  markStateNeedsInit(animationId);
 }
 
 function buildSceneList() {
@@ -340,6 +426,10 @@ function setActiveAnimation(id: string) {
     return;
   }
   activeAnimation = next;
+  if (next.stateful) {
+    getStateResources(next);
+    markStateNeedsInit(next.id);
+  }
   hudTitle.textContent = next.name;
   hudDesc.textContent = next.description;
   buildPanelActions(next);
@@ -441,6 +531,26 @@ function applyUniforms(
   }
 }
 
+function applyStateUniforms(
+  animation: AnimationConfig,
+  info: ProgramInfo,
+  state: StatefulResources,
+  pass: number,
+) {
+  const passLoc = info.uniforms[animation.passUniform ?? "uPass"];
+  if (passLoc) {
+    gl.uniform1i(passLoc, pass);
+  }
+  const gridLoc = info.uniforms[animation.gridUniform ?? "uGridSize"];
+  if (gridLoc) {
+    gl.uniform2f(gridLoc, state.size, state.size);
+  }
+  const stateLoc = info.uniforms[animation.stateUniform ?? "uState"];
+  if (stateLoc) {
+    gl.uniform1i(stateLoc, 0);
+  }
+}
+
 function renderFrame(now: number) {
   const elapsed = (now - startTime) / 1000;
   const { width, height } = resizeCanvasToDisplaySize(canvas);
@@ -448,6 +558,59 @@ function renderFrame(now: number) {
   if (!info) {
     return;
   }
+
+  if (activeAnimation.stateful) {
+    if (!supportsFloatTargets) {
+      hudDesc.textContent = "Stateful scenes require float render targets (EXT_color_buffer_float).";
+      requestAnimationFrame(renderFrame);
+      return;
+    }
+    const state = getStateResources(activeAnimation);
+    if (!state) {
+      requestAnimationFrame(renderFrame);
+      return;
+    }
+
+    const currentTex = () => state.textures[state.index];
+    const nextFbo = () => state.fbos[(state.index + 1) % 2];
+
+    gl.useProgram(info.program);
+    gl.bindVertexArray(vao);
+
+    if (state.needsInit) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, nextFbo());
+      gl.viewport(0, 0, state.size, state.size);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, currentTex());
+      applyUniforms(activeAnimation, info, elapsed, width, height);
+      applyStateUniforms(activeAnimation, info, state, 2);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      state.index = (state.index + 1) % 2;
+      state.needsInit = false;
+    }
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, nextFbo());
+    gl.viewport(0, 0, state.size, state.size);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, currentTex());
+    applyUniforms(activeAnimation, info, elapsed, width, height);
+    applyStateUniforms(activeAnimation, info, state, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    state.index = (state.index + 1) % 2;
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, width, height);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, currentTex());
+    applyUniforms(activeAnimation, info, elapsed, width, height);
+    applyStateUniforms(activeAnimation, info, state, 1);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    requestAnimationFrame(renderFrame);
+    return;
+  }
+
   gl.viewport(0, 0, width, height);
   gl.clearColor(0, 0, 0, 1);
   gl.clear(gl.COLOR_BUFFER_BIT);
