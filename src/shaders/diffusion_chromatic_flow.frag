@@ -28,6 +28,24 @@ vec3 hsv2rgb(vec3 c) {
   return c.z * mix(vec3(1.0), rgb, c.y);
 }
 
+vec2 sampleState(vec2 uv) {
+  vec2 gridUV = uv * uGridSize - 0.5;
+  vec2 base = floor(gridUV);
+  vec2 f = fract(gridUV);
+  vec2 invGrid = 1.0 / uGridSize;
+  vec2 p00 = (base + vec2(0.5, 0.5)) * invGrid;
+  vec2 p10 = (base + vec2(1.5, 0.5)) * invGrid;
+  vec2 p01 = (base + vec2(0.5, 1.5)) * invGrid;
+  vec2 p11 = (base + vec2(1.5, 1.5)) * invGrid;
+  vec2 v00 = texture(uState, p00).rg;
+  vec2 v10 = texture(uState, p10).rg;
+  vec2 v01 = texture(uState, p01).rg;
+  vec2 v11 = texture(uState, p11).rg;
+  vec2 v0 = mix(v00, v10, f.x);
+  vec2 v1 = mix(v01, v11, f.x);
+  return mix(v0, v1, f.y);
+}
+
 vec2 diffuseVec2(vec2 uv, vec2 texel) {
   vec2 c = texture(uState, uv).rg;
   vec2 sum = c * uSelfWeight;
@@ -82,7 +100,7 @@ void main() {
   }
 
   vec2 uv = gl_FragCoord.xy / uResolution;
-  vec2 ab = texture(uState, uv).rg;
+  vec2 ab = sampleState(uv);
   float angle = atan(ab.y, ab.x);
   float mag = length(ab);
   float hue = (angle + 3.14159265) / 6.2831853;

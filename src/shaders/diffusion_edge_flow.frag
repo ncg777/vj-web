@@ -29,6 +29,24 @@ vec3 hsv2rgb(vec3 c) {
   return c.z * mix(vec3(1.0), rgb, c.y);
 }
 
+float sampleState(vec2 uv) {
+  vec2 gridUV = uv * uGridSize - 0.5;
+  vec2 base = floor(gridUV);
+  vec2 f = fract(gridUV);
+  vec2 invGrid = 1.0 / uGridSize;
+  vec2 p00 = (base + vec2(0.5, 0.5)) * invGrid;
+  vec2 p10 = (base + vec2(1.5, 0.5)) * invGrid;
+  vec2 p01 = (base + vec2(0.5, 1.5)) * invGrid;
+  vec2 p11 = (base + vec2(1.5, 1.5)) * invGrid;
+  float v00 = texture(uState, p00).r;
+  float v10 = texture(uState, p10).r;
+  float v01 = texture(uState, p01).r;
+  float v11 = texture(uState, p11).r;
+  float v0 = mix(v00, v10, f.x);
+  float v1 = mix(v01, v11, f.x);
+  return mix(v0, v1, f.y);
+}
+
 float diffuseScalar(vec2 uv, vec2 texel) {
   float c = texture(uState, uv).r;
   float sum = c * uSelfWeight;
@@ -68,10 +86,10 @@ void main() {
 
   vec2 uv = gl_FragCoord.xy / uResolution;
   vec2 texel = 1.0 / uGridSize;
-  float xL = texture(uState, uv - vec2(texel.x, 0.0)).r;
-  float xR = texture(uState, uv + vec2(texel.x, 0.0)).r;
-  float xD = texture(uState, uv - vec2(0.0, texel.y)).r;
-  float xU = texture(uState, uv + vec2(0.0, texel.y)).r;
+  float xL = sampleState(uv - vec2(texel.x, 0.0));
+  float xR = sampleState(uv + vec2(texel.x, 0.0));
+  float xD = sampleState(uv - vec2(0.0, texel.y));
+  float xU = sampleState(uv + vec2(0.0, texel.y));
 
   vec2 grad = vec2(xR - xL, xU - xD);
   float mag = length(grad) * uFlowGain;

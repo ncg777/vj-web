@@ -3,12 +3,12 @@ import tanhFrag from "./shaders/terrain_tanh_isoclines.frag?raw";
 import tunnelFrag from "./shaders/brownian_loop_tunnel.frag?raw";
 import kochFrag from "./shaders/koch_snowflake.frag?raw";
 import quasiFrag from "./shaders/quasi_snowflake.frag?raw";
-import diffHeatFrag from "./shaders/diffusion_heat_blobs.frag?raw";
 import diffChromaticFrag from "./shaders/diffusion_chromatic_flow.frag?raw";
 import diffEdgeFlowFrag from "./shaders/diffusion_edge_flow.frag?raw";
 import diffThresholdFrag from "./shaders/diffusion_threshold_feedback.frag?raw";
 import prismFrag from "./shaders/prismatic_fold_raymarch.frag?raw";
 import seascapeFrag from "./shaders/seascape_tdm.frag?raw";
+import tileableWaterPlusFrag from "./shaders/tileable_water_plus.frag?raw";
 import sunsetPlusFrag from "./shaders/sunset_plus.frag?raw";
 import zippyZapsFrag from "./shaders/zippy_zaps.frag?raw";
 
@@ -786,6 +786,108 @@ export const animations: AnimationConfig[] = [
     ],
   },
   {
+    id: "tileable-water-plus",
+    name: "Tileable Water Plus",
+    description: "Tileable water ripples with tunable speed, scale, and tint.",
+    fragment: tileableWaterPlusFrag,
+    resolutionUniform: "uResolution",
+    timeUniform: "uTime",
+    timeMode: "seconds",
+    params: [
+      {
+        id: "timeScale",
+        label: "Time Scale",
+        uniform: "uTimeScale",
+        type: "float",
+        value: 0.5,
+        min: 0.0,
+        max: 2.0,
+        step: 0.02,
+        key: { inc: "1", dec: "2", step: 0.05, shiftStep: 0.2 },
+      },
+      {
+        id: "tileScale",
+        label: "Tile Scale",
+        uniform: "uTileScale",
+        type: "float",
+        value: 1.0,
+        min: 0.5,
+        max: 3.0,
+        step: 0.05,
+        key: { inc: "3", dec: "4", step: 0.05, shiftStep: 0.2 },
+      },
+      {
+        id: "intensity",
+        label: "Intensity",
+        uniform: "uIntensity",
+        type: "float",
+        value: 1.0,
+        min: 0.2,
+        max: 2.5,
+        step: 0.05,
+        key: { inc: "5", dec: "6", step: 0.05, shiftStep: 0.2 },
+      },
+      {
+        id: "contrast",
+        label: "Contrast",
+        uniform: "uContrast",
+        type: "float",
+        value: 1.2,
+        min: 0.3,
+        max: 2.5,
+        step: 0.05,
+        key: { inc: "7", dec: "8", step: 0.05, shiftStep: 0.2 },
+      },
+      {
+        id: "waveShift",
+        label: "Wave Shift",
+        uniform: "uWaveShift",
+        type: "float",
+        value: 0.0,
+        min: -3.0,
+        max: 3.0,
+        step: 0.05,
+        key: { inc: "q", dec: "a", step: 0.05, shiftStep: 0.2 },
+      },
+      {
+        id: "tintRed",
+        label: "Tint Red",
+        uniform: "uTint",
+        type: "float",
+        value: 0.0,
+        min: 0.0,
+        max: 1.0,
+        step: 0.01,
+        key: { inc: "w", dec: "s", step: 0.02 },
+        component: 0,
+      },
+      {
+        id: "tintGreen",
+        label: "Tint Green",
+        uniform: "uTint",
+        type: "float",
+        value: 0.35,
+        min: 0.0,
+        max: 1.0,
+        step: 0.01,
+        key: { inc: "e", dec: "d", step: 0.02 },
+        component: 1,
+      },
+      {
+        id: "tintBlue",
+        label: "Tint Blue",
+        uniform: "uTint",
+        type: "float",
+        value: 0.5,
+        min: 0.0,
+        max: 1.0,
+        step: 0.01,
+        key: { inc: "r", dec: "f", step: 0.02 },
+        component: 2,
+      },
+    ],
+  },
+  {
     id: "seascape",
     name: "Seascape Plus",
     description: "Raymarched ocean with tunable swell and camera drift.",
@@ -1053,92 +1155,6 @@ export const animations: AnimationConfig[] = [
     ],
   },
   {
-    id: "diff-heat",
-    name: "Diffusion Heat Blobs",
-    description: "Living stains from doubly-stochastic diffusion with drifting injectors.",
-    fragment: diffHeatFrag,
-    resolutionUniform: "uResolution",
-    timeUniform: "uTime",
-    timeMode: "seconds",
-    stateful: true,
-    bufferSize: 192,
-    params: [
-      {
-        id: "selfWeight",
-        label: "Self Weight",
-        uniform: "uSelfWeight",
-        type: "float",
-        value: 0.5,
-        min: 0.0,
-        max: 2.0,
-        step: 0.01,
-        key: { inc: "1", dec: "2", step: 0.05, shiftStep: 0.2 },
-      },
-      {
-        id: "neighborWeight",
-        label: "Neighbor Weight",
-        uniform: "uNeighborWeight",
-        type: "float",
-        value: 1.0,
-        min: 0.05,
-        max: 2.0,
-        step: 0.01,
-        key: { inc: "3", dec: "4", step: 0.05, shiftStep: 0.2 },
-      },
-      {
-        id: "decay",
-        label: "Decay",
-        uniform: "uDecay",
-        type: "float",
-        value: 0.997,
-        min: 0.9,
-        max: 0.9999,
-        step: 0.0005,
-        key: { inc: "5", dec: "6", step: 0.001, shiftStep: 0.005 },
-      },
-      {
-        id: "blobAmp",
-        label: "Blob Amp",
-        uniform: "uBlobAmp",
-        type: "float",
-        value: 0.6,
-        min: 0.0,
-        max: 2.0,
-        step: 0.02,
-        key: { inc: "7", dec: "8", step: 0.05, shiftStep: 0.2 },
-      },
-      {
-        id: "blobRadius",
-        label: "Blob Radius",
-        uniform: "uBlobRadius",
-        type: "float",
-        value: 0.08,
-        min: 0.01,
-        max: 0.25,
-        step: 0.005,
-        key: { inc: "q", dec: "a", step: 0.01, shiftStep: 0.03 },
-      },
-      {
-        id: "speed",
-        label: "Speed",
-        uniform: "uSpeed",
-        type: "float",
-        value: 0.7,
-        min: 0.0,
-        max: 3.0,
-        step: 0.05,
-        key: { inc: "w", dec: "s", step: 0.05, shiftStep: 0.2 },
-      },
-      {
-        id: "seed",
-        label: "Seed",
-        uniform: "uSeed",
-        type: "seed",
-        value: 0,
-      },
-    ],
-  },
-  {
     id: "diff-chromatic",
     name: "Chromatic Flow",
     description: "Two-channel diffusion with hue-as-angle and drifting color pulses.",
@@ -1147,7 +1163,7 @@ export const animations: AnimationConfig[] = [
     timeUniform: "uTime",
     timeMode: "seconds",
     stateful: true,
-    bufferSize: 192,
+    bufferSize: 384,
     params: [
       {
         id: "selfWeight",
@@ -1365,7 +1381,7 @@ export const animations: AnimationConfig[] = [
     timeUniform: "uTime",
     timeMode: "seconds",
     stateful: true,
-    bufferSize: 192,
+    bufferSize: 384,
     params: [
       {
         id: "selfWeight",
@@ -1595,6 +1611,8 @@ export const animations: AnimationConfig[] = [
     ],
   },
 ];
+
+
 
 
 
