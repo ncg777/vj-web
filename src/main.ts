@@ -145,6 +145,21 @@ let activeControls: Record<
 > = {};
 let startTime = performance.now();
 let hudTimeout: number | null = null;
+let sidebarTimeout: number | null = null;
+
+function setSidebarToggleHidden(hidden: boolean) {
+  sidebarToggleButton.classList.toggle("hidden", hidden);
+}
+
+function showSidebarToggleTemporarily() {
+  setSidebarToggleHidden(false);
+  if (sidebarTimeout !== null) {
+    window.clearTimeout(sidebarTimeout);
+  }
+  sidebarTimeout = window.setTimeout(() => {
+    setSidebarToggleHidden(true);
+  }, 2500);
+}
 
 function updateSidebarToggleLabel() {
   const isCollapsed = document.body.classList.contains("sidebar-collapsed");
@@ -315,7 +330,9 @@ function buildSceneList() {
     button.className = "scene-button";
     button.textContent = animation.name;
     button.dataset.scene = animation.id;
-    button.addEventListener("click", () => setActiveAnimation(animation.id));
+    button.addEventListener("click", () => {
+      setActiveAnimation(animation.id);
+    });
     sceneList.appendChild(button);
   }
 }
@@ -622,6 +639,10 @@ sidebarToggleButton.addEventListener("click", () => {
   updateSidebarToggleLabel();
 });
 
+stage.addEventListener("mousemove", () => {
+  showSidebarToggleTemporarily();
+});
+
 document.addEventListener("keydown", handleKey);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
@@ -632,4 +653,5 @@ document.addEventListener("visibilitychange", () => {
 buildSceneList();
 setActiveAnimation(activeAnimation.id);
 updateSidebarToggleLabel();
+setSidebarToggleHidden(true);
 requestAnimationFrame(renderFrame);
