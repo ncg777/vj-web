@@ -30,17 +30,6 @@ if (!app) {
 
 app.innerHTML = `
   <div class="app-shell">
-    <header class="top-bar">
-      <div class="brand">
-        <div class="badge">VJ LAB</div>
-        <div class="brand-title">GL Field Deck</div>
-        <div class="brand-sub">Live shader scenes for performance and capture</div>
-      </div>
-      <div class="top-actions">
-        <button class="ghost" data-action="toggle-ui">Hide UI</button>
-        <button class="accent" data-action="fullscreen">Fullscreen</button>
-      </div>
-    </header>
     <div class="layout">
       <aside class="panel">
         <div class="panel-section">
@@ -59,7 +48,7 @@ app.innerHTML = `
       </aside>
       <main class="stage">
         <canvas id="gl-canvas"></canvas>
-        <button class="floating-toggle" data-action="toggle-ui-floating">Show UI</button>
+        <button class="sidebar-toggle" data-action="toggle-sidebar">Controls</button>
         <div class="hud">
           <div class="hud-title" id="hud-title"></div>
           <div class="hud-desc" id="hud-desc"></div>
@@ -76,15 +65,8 @@ const panelActions = document.querySelector<HTMLDivElement>("#panel-actions")!;
 const keyHelp = document.querySelector<HTMLDivElement>("#key-help")!;
 const hudTitle = document.querySelector<HTMLDivElement>("#hud-title")!;
 const hudDesc = document.querySelector<HTMLDivElement>("#hud-desc")!;
-const toggleUiButton = document.querySelector<HTMLButtonElement>(
-  "[data-action='toggle-ui']",
-)!;
-const floatingToggleButton = document.querySelector<HTMLButtonElement>(
-  "[data-action='toggle-ui-floating']",
-)!;
-const fullscreenButton = document.querySelector<HTMLButtonElement>(
-  "[data-action='fullscreen']",
-)!;
+const sidebarToggleButton =
+  document.querySelector<HTMLButtonElement>("[data-action='toggle-sidebar']")!;
 const stage = document.querySelector<HTMLElement>(".stage")!;
 
 if (
@@ -95,9 +77,7 @@ if (
   !keyHelp ||
   !hudTitle ||
   !hudDesc ||
-  !toggleUiButton ||
-  !floatingToggleButton ||
-  !fullscreenButton ||
+  !sidebarToggleButton ||
   !stage
 ) {
   throw new Error("Missing required UI elements");
@@ -163,7 +143,6 @@ let activeControls: Record<
   string,
   { range?: HTMLInputElement; number?: HTMLInputElement }
 > = {};
-let uiHidden = false;
 let startTime = performance.now();
 
 function createStateTexture(size: number) {
@@ -621,29 +600,11 @@ function renderFrame(now: number) {
   requestAnimationFrame(renderFrame);
 }
 
-function setUiHidden(nextHidden: boolean) {
-  uiHidden = nextHidden;
-  document.body.classList.toggle("ui-hidden", uiHidden);
-  toggleUiButton.textContent = uiHidden ? "Show UI" : "Hide UI";
-  floatingToggleButton.textContent = uiHidden ? "Show UI" : "Hide UI";
-}
-
-toggleUiButton.addEventListener("click", () => setUiHidden(!uiHidden));
-floatingToggleButton.addEventListener("click", () => setUiHidden(!uiHidden));
-fullscreenButton.addEventListener("click", async () => {
-  if (document.fullscreenElement) {
-    await document.exitFullscreen();
-  } else {
-    await stage.requestFullscreen();
-  }
+sidebarToggleButton.addEventListener("click", () => {
+  document.body.classList.toggle("sidebar-collapsed");
 });
 
 document.addEventListener("keydown", handleKey);
-document.addEventListener("fullscreenchange", () => {
-  fullscreenButton.textContent = document.fullscreenElement
-    ? "Exit Fullscreen"
-    : "Fullscreen";
-});
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
     startTime = performance.now();
