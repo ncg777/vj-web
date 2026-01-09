@@ -1,6 +1,8 @@
-#version 330 core
+#version 300 es
+precision highp float;
+precision highp int;
 
-out vec4 FragColor;
+out vec4 outColor;
 
 uniform float uTime;
 uniform vec2 uResolution;
@@ -74,5 +76,5 @@ void main() {
     vec3 uuv = ro + cf * 3.0 + uv.x * cs + uv.y * cu;
     vec3 rd = normalize(uuv - ro);
 
-    FragColor = rm(ro, rd);
+    outColor = rm(ro, rd);
 }
