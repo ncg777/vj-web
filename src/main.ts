@@ -48,7 +48,7 @@ app.innerHTML = `
       </aside>
       <main class="stage">
         <canvas id="gl-canvas"></canvas>
-        <button class="sidebar-toggle" data-action="toggle-sidebar">Controls</button>
+        <button class="sidebar-toggle" data-action="toggle-sidebar"></button>
         <div class="hud">
           <div class="hud-title" id="hud-title"></div>
           <div class="hud-desc" id="hud-desc"></div>
@@ -144,6 +144,22 @@ let activeControls: Record<
   { range?: HTMLInputElement; number?: HTMLInputElement }
 > = {};
 let startTime = performance.now();
+let hudTimeout: number | null = null;
+
+function updateSidebarToggleLabel() {
+  const isCollapsed = document.body.classList.contains("sidebar-collapsed");
+  sidebarToggleButton.textContent = isCollapsed ? ">>" : "<<";
+}
+
+function showHudTemporarily() {
+  hudTitle.parentElement?.classList.remove("hidden");
+  if (hudTimeout !== null) {
+    window.clearTimeout(hudTimeout);
+  }
+  hudTimeout = window.setTimeout(() => {
+    hudTitle.parentElement?.classList.add("hidden");
+  }, 10000);
+}
 
 function createStateTexture(size: number) {
   const texture = gl.createTexture();
@@ -411,6 +427,7 @@ function setActiveAnimation(id: string) {
   }
   hudTitle.textContent = next.name;
   hudDesc.textContent = next.description;
+  showHudTemporarily();
   buildPanelActions(next);
   buildControls(next);
   buildKeyHelp(next);
@@ -602,6 +619,7 @@ function renderFrame(now: number) {
 
 sidebarToggleButton.addEventListener("click", () => {
   document.body.classList.toggle("sidebar-collapsed");
+  updateSidebarToggleLabel();
 });
 
 document.addEventListener("keydown", handleKey);
@@ -613,4 +631,5 @@ document.addEventListener("visibilitychange", () => {
 
 buildSceneList();
 setActiveAnimation(activeAnimation.id);
+updateSidebarToggleLabel();
 requestAnimationFrame(renderFrame);
