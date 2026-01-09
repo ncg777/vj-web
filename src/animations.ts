@@ -1442,6 +1442,17 @@ export const animations: AnimationConfig[] = [
         key: { inc: "w", dec: "s", step: 0.02, shiftStep: 0.06 },
       },
       {
+        id: "turbulence",
+        label: "Turbulence",
+        uniform: "uTurbulence",
+        type: "float",
+        value: 0.8,
+        min: 0.0,
+        max: 2.0,
+        step: 0.05,
+        key: { inc: "e", dec: "d", step: 0.05, shiftStep: 0.2 },
+      },
+      {
         id: "injectAmp",
         label: "Inject Amp",
         uniform: "uInjectAmp",
