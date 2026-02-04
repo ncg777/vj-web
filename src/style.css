@@ -142,30 +142,37 @@ button.small {
   flex-wrap: wrap;
 }
 
-.scene-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.scene-button {
+.scene-select {
+  width: 100%;
   padding: 12px 14px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  text-align: left;
   font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  cursor: pointer;
   transition: 0.2s ease;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23a3b1c2' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
 }
 
-.scene-button:hover {
+.scene-select:hover {
   border-color: rgba(255, 255, 255, 0.24);
 }
 
-.scene-button.active {
-  background: linear-gradient(140deg, rgba(53, 208, 194, 0.35), rgba(255, 138, 61, 0.12));
-  border-color: rgba(255, 255, 255, 0.3);
-  box-shadow: 0 8px 20px rgba(53, 208, 194, 0.2);
+.scene-select:focus {
+  outline: none;
+  border-color: rgba(53, 208, 194, 0.5);
+  box-shadow: 0 0 0 2px rgba(53, 208, 194, 0.15);
+}
+
+.scene-select option {
+  background: var(--bg-2);
+  color: var(--text);
+  padding: 8px;
 }
 
 .control-list {

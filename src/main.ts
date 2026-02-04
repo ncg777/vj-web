@@ -34,7 +34,7 @@ app.innerHTML = `
       <aside class="panel">
         <div class="panel-section">
           <div class="section-title">Scenes</div>
-          <div class="scene-list" id="scene-list"></div>
+          <select class="scene-select" id="scene-list"></select>
         </div>
         <div class="panel-section">
           <div class="section-title">Controls</div>
@@ -59,7 +59,7 @@ app.innerHTML = `
 `;
 
 const canvas = document.querySelector<HTMLCanvasElement>("#gl-canvas")!;
-const sceneList = document.querySelector<HTMLDivElement>("#scene-list")!;
+const sceneList = document.querySelector<HTMLSelectElement>("#scene-list")!;
 const controlList = document.querySelector<HTMLDivElement>("#control-list")!;
 const panelActions = document.querySelector<HTMLDivElement>("#panel-actions")!;
 const keyHelp = document.querySelector<HTMLDivElement>("#key-help")!;
@@ -326,15 +326,14 @@ function resetParams(animationId: string) {
 function buildSceneList() {
   sceneList.innerHTML = "";
   for (const animation of animations) {
-    const button = document.createElement("button");
-    button.className = "scene-button";
-    button.textContent = animation.name;
-    button.dataset.scene = animation.id;
-    button.addEventListener("click", () => {
-      setActiveAnimation(animation.id);
-    });
-    sceneList.appendChild(button);
+    const option = document.createElement("option");
+    option.value = animation.id;
+    option.textContent = animation.name;
+    sceneList.appendChild(option);
   }
+  sceneList.addEventListener("change", () => {
+    setActiveAnimation(sceneList.value);
+  });
 }
 
 function buildPanelActions(animation: AnimationConfig) {
@@ -449,10 +448,7 @@ function setActiveAnimation(id: string) {
   buildControls(next);
   buildKeyHelp(next);
 
-  sceneList.querySelectorAll(".scene-button").forEach((button) => {
-    const element = button as HTMLButtonElement;
-    element.classList.toggle("active", element.dataset.scene === next.id);
-  });
+  sceneList.value = next.id;
 }
 
 function handleKey(event: KeyboardEvent) {
