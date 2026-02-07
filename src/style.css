@@ -320,6 +320,112 @@ body.sidebar-collapsed .panel {
   pointer-events: none;
 }
 
+/* Recording controls */
+.rec-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#rec-btn.recording {
+  background: rgba(255, 60, 60, 0.25);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.rec-badge {
+  font-size: 12px;
+  color: var(--danger);
+  animation: rec-pulse 1s ease-in-out infinite;
+}
+
+.rec-badge.hidden {
+  display: none;
+}
+
+@keyframes rec-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Offline render controls */
+.offline-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.offline-row {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.offline-row input[type="number"],
+.offline-row select {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text);
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.offline-row select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%23a3b1c2' d='M2 3l3 4 3-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 22px;
+}
+
+.offline-row select option {
+  background: var(--bg-2);
+  color: var(--text);
+}
+
+.offline-unit {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.offline-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.offline-progress.hidden {
+  display: none;
+}
+
+.offline-progress-bar {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  transition: width 0.15s ease;
+}
+
+.offline-status {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.offline-status.hidden {
+  display: none;
+}
+
+#offline-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 body:not(.sidebar-collapsed) .sidebar-toggle {
   left: calc(16px + 320px + 12px);
 }

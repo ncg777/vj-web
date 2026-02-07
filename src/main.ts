@@ -8,6 +8,7 @@ import {
   resizeCanvasToDisplaySize,
   type UniformLocations,
 } from "./gl";
+import { Muxer, FileSystemWritableFileStreamTarget } from "mp4-muxer";
 
 type ProgramInfo = {
   program: WebGLProgram;
@@ -40,6 +41,44 @@ app.innerHTML = `
           <div class="section-title">Controls</div>
           <div class="panel-actions" id="panel-actions"></div>
           <div class="control-list" id="control-list"></div>
+        </div>
+        <div class="panel-section">
+          <div class="section-title">Record</div>
+          <div class="rec-row">
+            <button class="ghost small" id="rec-btn">Record</button>
+            <span class="rec-badge hidden" id="rec-badge"></span>
+          </div>
+        </div>
+        <div class="panel-section">
+          <div class="section-title">Offline Render</div>
+          <div class="offline-controls">
+            <div class="offline-row">
+              <label>Duration</label>
+              <input type="number" id="offline-duration" value="10" min="1" max="3600" step="1" />
+              <span class="offline-unit">sec</span>
+            </div>
+            <div class="offline-row">
+              <label>FPS</label>
+              <select id="offline-fps">
+                <option value="30">30</option>
+                <option value="60" selected>60</option>
+              </select>
+            </div>
+            <div class="offline-row">
+              <label>Resolution</label>
+              <select id="offline-res">
+                <option value="1280x720">720p</option>
+                <option value="1920x1080" selected>1080p</option>
+                <option value="2560x1440">1440p</option>
+                <option value="3840x2160">4K</option>
+              </select>
+            </div>
+            <button class="ghost small" id="offline-btn">Generate</button>
+            <div class="offline-progress hidden" id="offline-progress">
+              <div class="offline-progress-bar" id="offline-bar"></div>
+            </div>
+            <div class="offline-status hidden" id="offline-status"></div>
+          </div>
         </div>
         <div class="panel-section small">
           <div class="section-title">Keys</div>
@@ -146,6 +185,121 @@ let activeControls: Record<
 let startTime = performance.now();
 let hudTimeout: number | null = null;
 let sidebarTimeout: number | null = null;
+
+// ── Recording state ──────────────────────────────────────────
+let mediaRecorder: MediaRecorder | null = null;
+let recordedChunks: Blob[] = [];
+let recordingStartTime = 0;
+let recordingTimerHandle: number | null = null;
+let isRecording = false;
+
+function pickMimeType(): string {
+  const candidates = [
+    "video/webm;codecs=vp9",
+    "video/webm;codecs=vp8",
+    "video/webm",
+    "video/mp4",
+  ];
+  for (const mime of candidates) {
+    if (MediaRecorder.isTypeSupported(mime)) return mime;
+  }
+  return "";
+}
+
+function extensionForMime(mime: string): string {
+  if (mime.startsWith("video/mp4")) return "mp4";
+  return "webm";
+}
+
+function formatDuration(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const m = String(Math.floor(totalSec / 60)).padStart(2, "0");
+  const s = String(totalSec % 60).padStart(2, "0");
+  return `${m}:${s}`;
+}
+
+function updateRecordingTimer() {
+  const badge = document.getElementById("rec-badge");
+  if (!badge || !isRecording) return;
+  badge.textContent = `⏺ ${formatDuration(performance.now() - recordingStartTime)}`;
+}
+
+function startRecording() {
+  const mime = pickMimeType();
+  if (!mime) {
+    alert("Recording is not supported in this browser.");
+    return;
+  }
+
+  const stream = canvas.captureStream(60);
+  recordedChunks = [];
+  mediaRecorder = new MediaRecorder(stream, {
+    mimeType: mime,
+    videoBitsPerSecond: 16_000_000,
+  });
+
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data.size > 0) recordedChunks.push(e.data);
+  };
+
+  mediaRecorder.onstop = () => {
+    const ext = extensionForMime(mime);
+    const blob = new Blob(recordedChunks, { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${activeAnimation.id}-${Date.now()}.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+    recordedChunks = [];
+  };
+
+  mediaRecorder.start(500); // collect data every 500ms
+  isRecording = true;
+  recordingStartTime = performance.now();
+
+  updateRecordButton();
+  recordingTimerHandle = window.setInterval(updateRecordingTimer, 250);
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    mediaRecorder.stop();
+  }
+  isRecording = false;
+  if (recordingTimerHandle !== null) {
+    clearInterval(recordingTimerHandle);
+    recordingTimerHandle = null;
+  }
+  updateRecordButton();
+}
+
+function toggleRecording() {
+  if (isRecording) {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+}
+
+function updateRecordButton() {
+  const btn = document.getElementById("rec-btn") as HTMLButtonElement | null;
+  const badge = document.getElementById("rec-badge");
+  if (!btn || !badge) return;
+  if (isRecording) {
+    btn.textContent = "Stop";
+    btn.classList.add("recording");
+    badge.classList.remove("hidden");
+  } else {
+    btn.textContent = "Record";
+    btn.classList.remove("recording");
+    badge.classList.add("hidden");
+    badge.textContent = "";
+  }
+}
+
+// ── Offline (non-realtime) rendering ─────────────────────────
+let isOfflineRendering = false;
 
 function setSidebarToggleHidden(hidden: boolean) {
   sidebarToggleButton.classList.toggle("hidden", hidden);
@@ -560,25 +714,24 @@ function applyStateUniforms(
   }
 }
 
-function renderFrame(now: number) {
-  const elapsed = (now - startTime) / 1000;
-  const { width, height } = resizeCanvasToDisplaySize(canvas);
-  const info = programById.get(activeAnimation.id);
-  if (!info) {
-    return;
-  }
+/**
+ * Render a single frame of `animation` at the given virtual time.
+ * The caller is responsible for setting the canvas size and calling
+ * gl.viewport / gl.clear beforehand when needed.
+ */
+function renderSingleFrame(
+  animation: AnimationConfig,
+  timeSeconds: number,
+  width: number,
+  height: number,
+) {
+  const info = programById.get(animation.id);
+  if (!info) return;
 
-  if (activeAnimation.stateful) {
-    if (!supportsFloatTargets) {
-      hudDesc.textContent = "Stateful scenes require float render targets (EXT_color_buffer_float).";
-      requestAnimationFrame(renderFrame);
-      return;
-    }
-    const state = getStateResources(activeAnimation);
-    if (!state) {
-      requestAnimationFrame(renderFrame);
-      return;
-    }
+  if (animation.stateful) {
+    if (!supportsFloatTargets) return;
+    const state = getStateResources(animation);
+    if (!state) return;
 
     const currentTex = () => state.textures[state.index];
     const nextFbo = () => state.fbos[(state.index + 1) % 2];
@@ -591,8 +744,8 @@ function renderFrame(now: number) {
       gl.viewport(0, 0, state.size, state.size);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, currentTex());
-      applyUniforms(activeAnimation, info, elapsed, width, height);
-      applyStateUniforms(activeAnimation, info, state, 2);
+      applyUniforms(animation, info, timeSeconds, width, height);
+      applyStateUniforms(animation, info, state, 2);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       state.index = (state.index + 1) % 2;
       state.needsInit = false;
@@ -602,8 +755,8 @@ function renderFrame(now: number) {
     gl.viewport(0, 0, state.size, state.size);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, currentTex());
-    applyUniforms(activeAnimation, info, elapsed, width, height);
-    applyStateUniforms(activeAnimation, info, state, 0);
+    applyUniforms(animation, info, timeSeconds, width, height);
+    applyStateUniforms(animation, info, state, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     state.index = (state.index + 1) % 2;
 
@@ -613,10 +766,9 @@ function renderFrame(now: number) {
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, currentTex());
-    applyUniforms(activeAnimation, info, elapsed, width, height);
-    applyStateUniforms(activeAnimation, info, state, 1);
+    applyUniforms(animation, info, timeSeconds, width, height);
+    applyStateUniforms(animation, info, state, 1);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    requestAnimationFrame(renderFrame);
     return;
   }
 
@@ -625,9 +777,225 @@ function renderFrame(now: number) {
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.useProgram(info.program);
   gl.bindVertexArray(vao);
-  applyUniforms(activeAnimation, info, elapsed, width, height);
+  applyUniforms(animation, info, timeSeconds, width, height);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+function renderFrame(now: number) {
+  if (isOfflineRendering) return; // paused while offline render is running
+  const elapsed = (now - startTime) / 1000;
+  const { width, height } = resizeCanvasToDisplaySize(canvas);
+  renderSingleFrame(activeAnimation, elapsed, width, height);
   requestAnimationFrame(renderFrame);
+}
+
+// ── Offline render engine (WebCodecs + mp4-muxer) ───────────
+
+/** Yield one animation frame — keeps the browser from thinking the page is hung. */
+function yieldFrame(): Promise<void> {
+  return new Promise((r) => requestAnimationFrame(() => r()));
+}
+
+async function offlineRender(
+  animation: AnimationConfig,
+  durationSec: number,
+  fps: number,
+  targetWidth: number,
+  targetHeight: number,
+) {
+  // Check WebCodecs availability
+  if (typeof VideoEncoder === "undefined" || typeof VideoFrame === "undefined") {
+    alert(
+      "Offline rendering requires the WebCodecs API (Chrome/Edge 94+, Safari 16.4+).",
+    );
+    return;
+  }
+
+  // Check H.264 support
+  const encoderConfig: VideoEncoderConfig = {
+    codec: "avc1.640028", // H.264 High Profile Level 4.0
+    width: targetWidth,
+    height: targetHeight,
+    bitrate: 16_000_000,
+    framerate: fps,
+  };
+  const support = await VideoEncoder.isConfigSupported(encoderConfig);
+  if (!support.supported) {
+    alert("H.264 video encoding is not supported on this device.");
+    return;
+  }
+
+  // Prompt user for save location — streams directly to disk, no memory pressure
+  let fileHandle: FileSystemFileHandle;
+  try {
+    fileHandle = await window.showSaveFilePicker({
+      suggestedName: `${animation.id}-${targetWidth}x${targetHeight}-${fps}fps-${durationSec}s.mp4`,
+      types: [
+        {
+          description: "MP4 Video",
+          accept: { "video/mp4": [".mp4"] },
+        },
+      ],
+    });
+  } catch {
+    // User cancelled the save dialog
+    return;
+  }
+
+  const writableStream = await fileHandle.createWritable();
+
+  // UI handles
+  const btn = document.getElementById("offline-btn") as HTMLButtonElement | null;
+  const progressWrap = document.getElementById("offline-progress");
+  const bar = document.getElementById("offline-bar");
+  const statusEl = document.getElementById("offline-status");
+  if (btn) btn.disabled = true;
+  progressWrap?.classList.remove("hidden");
+  statusEl?.classList.remove("hidden");
+
+  // Pause live loop
+  isOfflineRendering = true;
+
+  // Reset stateful resources so the offline render starts clean
+  if (animation.stateful) {
+    getStateResources(animation);
+    markStateNeedsInit(animation.id);
+  }
+
+  // Resize canvas to target output size
+  const prevWidth = canvas.width;
+  const prevHeight = canvas.height;
+  const prevStyleW = canvas.style.width;
+  const prevStyleH = canvas.style.height;
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  canvas.style.width = `${targetWidth}px`;
+  canvas.style.height = `${targetHeight}px`;
+
+  // Set up mp4-muxer — stream to disk via File System Access API
+  const muxTarget = new FileSystemWritableFileStreamTarget(writableStream);
+  const muxer = new Muxer({
+    target: muxTarget,
+    video: {
+      codec: "avc",
+      width: targetWidth,
+      height: targetHeight,
+    },
+    fastStart: false, // streaming mode — no need to buffer everything in RAM
+  });
+
+  // Set up VideoEncoder
+  let encoderError: Error | null = null;
+  const encoder = new VideoEncoder({
+    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta ?? undefined),
+    error: (e) => {
+      encoderError = e;
+    },
+  });
+  encoder.configure(encoderConfig);
+
+  const totalFrames = Math.ceil(durationSec * fps);
+  const frameDurationUs = Math.round(1_000_000 / fps);
+  const KEYFRAME_INTERVAL = fps * 2; // keyframe every 2 seconds
+  const FLUSH_INTERVAL = fps * 30;   // flush encoder every 30 seconds of video
+  const t0 = performance.now();
+
+  // Handle context loss during render — attempt to save partial output
+  let contextLost = false;
+  const onContextLost = (e: Event) => {
+    e.preventDefault(); // allow restoration later
+    contextLost = true;
+  };
+  canvas.addEventListener("webglcontextlost", onContextLost);
+
+  for (let frame = 0; frame < totalFrames; frame++) {
+    if (encoderError || contextLost) break;
+
+    const timeSeconds = frame / fps;
+    renderSingleFrame(animation, timeSeconds, targetWidth, targetHeight);
+    gl.finish(); // ensure GPU is done before capturing
+
+    const videoFrame = new VideoFrame(canvas, {
+      timestamp: frame * frameDurationUs,
+      duration: frameDurationUs,
+    });
+    encoder.encode(videoFrame, {
+      keyFrame: frame % KEYFRAME_INTERVAL === 0,
+    });
+    videoFrame.close();
+
+    // Periodically flush the encoder to reduce memory pressure
+    if (frame > 0 && frame % FLUSH_INTERVAL === 0) {
+      await encoder.flush();
+    }
+
+    // Update progress
+    const pct = ((frame + 1) / totalFrames) * 100;
+    if (bar) bar.style.width = `${pct}%`;
+    if (frame % 30 === 0) {
+      const elapsed = (performance.now() - t0) / 1000;
+      const remaining =
+        (elapsed / (frame + 1)) * (totalFrames - frame - 1);
+      if (statusEl) {
+        statusEl.textContent = `Frame ${frame + 1}/${totalFrames}  \u2014  ~${Math.ceil(remaining)}s left`;
+      }
+    }
+
+    // Yield every frame via rAF to prevent the browser from killing the context.
+    // Also applies backpressure if the encoder is falling behind.
+    if (encoder.encodeQueueSize > 10) {
+      await new Promise<void>((r) => setTimeout(r, 1));
+    }
+    await yieldFrame();
+  }
+
+  canvas.removeEventListener("webglcontextlost", onContextLost);
+
+  // Flush encoder, finalize MP4, and close the file stream
+  try {
+    await encoder.flush();
+    encoder.close();
+    muxer.finalize();
+    await writableStream.close();
+  } catch (e) {
+    console.error("Finalization failed:", e);
+    try { await writableStream.close(); } catch { /* already closed */ }
+  }
+
+  // Restore canvas
+  canvas.style.width = prevStyleW;
+  canvas.style.height = prevStyleH;
+  canvas.width = prevWidth;
+  canvas.height = prevHeight;
+
+  // Reset stateful so live rendering resumes cleanly
+  if (animation.stateful) {
+    markStateNeedsInit(animation.id);
+  }
+
+  // Resume live loop
+  isOfflineRendering = false;
+  startTime = performance.now();
+  requestAnimationFrame(renderFrame);
+
+  // Update UI
+  if (btn) btn.disabled = false;
+  const errorMessage = encoderError ? (encoderError as Error).message : null;
+  if (statusEl) {
+    if (contextLost) {
+      statusEl.textContent = `Context lost — partial video saved.`;
+    } else if (errorMessage) {
+      statusEl.textContent = `Error: ${errorMessage}`;
+    } else {
+      statusEl.textContent = "Done!";
+    }
+  }
+  const hasIssue = contextLost || !!errorMessage;
+  setTimeout(() => {
+    progressWrap?.classList.add("hidden");
+    statusEl?.classList.add("hidden");
+    if (bar) bar.style.width = "0%";
+  }, hasIssue ? 8000 : 3000);
 }
 
 sidebarToggleButton.addEventListener("click", () => {
@@ -644,6 +1012,19 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
     startTime = performance.now();
   }
+});
+
+document.getElementById("rec-btn")?.addEventListener("click", toggleRecording);
+
+document.getElementById("offline-btn")?.addEventListener("click", () => {
+  if (isOfflineRendering) return;
+  const durationInput = document.getElementById("offline-duration") as HTMLInputElement;
+  const fpsSelect = document.getElementById("offline-fps") as HTMLSelectElement;
+  const resSelect = document.getElementById("offline-res") as HTMLSelectElement;
+  const duration = Math.max(1, Math.min(3600, Number(durationInput?.value ?? 10)));
+  const fps = Number(fpsSelect?.value ?? 60);
+  const [w, h] = (resSelect?.value ?? "1920x1080").split("x").map(Number);
+  offlineRender(activeAnimation, duration, fps, w, h);
 });
 
 buildSceneList();
