@@ -4067,3 +4067,5 @@ export const animations: AnimationConfig[] = [
   },
 ];
 
+animations.sort((a, b) => a.name.localeCompare(b.name));
+
