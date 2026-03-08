@@ -33,6 +33,7 @@ uniform float uBrightness;
 uniform float uContrast;
 uniform float uGlowIntensity;
 uniform float uChromaShift;
+uniform float uSmoothBlend;
 
 // Camera
 uniform float uZoom;
@@ -49,15 +50,21 @@ mat2 rot2(float a) {
     return mat2(c, -s, s, c);
 }
 
+float smin(float a, float b, float k) {
+    float h = max(k - abs(a - b), 0.0) / k;
+    return min(a, b) - h * h * h * k * (1.0 / 6.0);
+}
+
 // ─── PSYCHEDELIC COLOR PALETTES ─────────────────────────────
 vec3 pal_neon(float t) {
     return 0.5 + 0.5 * cos(TAU * (t * vec3(1.0, 0.8, 0.6)
          + vec3(0.00, 0.33, 0.67)));
 }
 
-vec3 pal_acid(float t) {
-    return 0.5 + 0.5 * cos(TAU * (t * vec3(0.7, 1.1, 1.4)
-         + vec3(0.10, 0.45, 0.80)));
+// Warm lava-lamp tones: amber → magenta → deep orange
+vec3 pal_lava(float t) {
+    return 0.5 + 0.5 * cos(TAU * (t * vec3(0.7, 0.9, 1.3)
+         + vec3(0.00, 0.18, 0.55)));
 }
 
 vec3 pal_fire(float t) {
@@ -82,9 +89,9 @@ float fractalDE(vec3 p, float time) {
 
     orbitTrap = vec4(1e10);
 
-    mat2 rXY = rot2(time * (0.05 + uRotSpeed * 0.15));
-    mat2 rYZ = rot2(time * (0.03 + uRotSpeed * 0.11));
-    mat2 rXZ = rot2(time * (0.04 + uRotSpeed * 0.13));
+    mat2 rXY = rot2(time * (0.01 + uRotSpeed * 0.03));
+    mat2 rYZ = rot2(time * (0.006 + uRotSpeed * 0.022));
+    mat2 rXZ = rot2(time * (0.008 + uRotSpeed * 0.026));
 
     float kalAngle = PI / max(uKaleidoFolds, 1.5);
 
@@ -103,16 +110,20 @@ float fractalDE(vec3 p, float time) {
         if (p.x < p.z) p.xz = p.zx;
         if (p.y < p.z) p.yz = p.zy;
 
-        // ── Box fold ──
-        p = clamp(p, -1.0, 1.0) * 2.0 - p;
+        // ── Box fold – smooth near boundary for lava-lamp softness ──
+        float sk = max(uSmoothBlend * 0.5, 0.01);
+        vec3 wt = smoothstep(vec3(1.0 - sk), vec3(1.0 + sk), abs(p));
+        p = mix(p, sign(p) * (2.0 - abs(p)), wt);
 
-        // ── Sphere fold ──
+        // ── Sphere fold – enlarged radii so blobs are big and merge ──
         float r2 = dot(p, p);
-        if (r2 < 0.25) {
-            float t = 4.0;
+        float minR2  = 0.45 + uSmoothBlend * 0.35;   // inner: ~0.45-0.80
+        float fixedR2 = 1.6 + uSmoothBlend * 0.60;   // outer: ~1.60-2.20
+        if (r2 < minR2) {
+            float t = fixedR2 / minR2;
             p *= t;  dr *= t;
-        } else if (r2 < 1.0) {
-            float t = 1.0 / r2;
+        } else if (r2 < fixedR2) {
+            float t = fixedR2 / r2;
             p *= t;  dr *= t;
         }
 
@@ -199,7 +210,7 @@ vec3 shade(vec3 p, vec3 n, vec3 rd, vec4 trap,
 
     // ── Orbit-trap psychedelic coloring ──
     vec3 c1 = pal_neon(trap.x * 2.0 + colorT);
-    vec3 c2 = pal_acid(trap.y * 1.5 + colorT + 0.33);
+    vec3 c2 = pal_lava(trap.y * 1.5 + colorT + 0.33);
     vec3 c3 = pal_fire(sqrt(trap.z) * 0.5 + colorT + 0.67);
     vec3 c4 = pal_ice(trap.w * 1.8 + colorT * 1.5 + 0.5);
 
@@ -222,7 +233,7 @@ vec3 shade(vec3 p, vec3 n, vec3 rd, vec4 trap,
 
     // ── Rim light ──
     float rim = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
-    vec3 rimCol = pal_acid(colorT + trap.x) * rim * 1.5;
+    vec3 rimCol = pal_lava(colorT + trap.x) * rim * 1.5;
 
     // ── AO + step-based AO ──
     float ao     = calcAO(p, n, time);
@@ -252,7 +263,7 @@ vec3 shade(vec3 p, vec3 n, vec3 rd, vec4 trap,
 vec3 background(vec2 uv, vec3 rd, float time, int steps, int maxSteps) {
     float colorT = time * uHueSpeed * 0.3 + uHueShift;
     float bgParam = length(uv) * 0.5 + colorT;
-    vec3 bg = pal_neon(bgParam) * 0.03 + pal_acid(bgParam + 0.3) * 0.02;
+    vec3 bg = pal_neon(bgParam) * 0.03 + pal_lava(bgParam + 0.3) * 0.02;
 
     float glow = float(steps) / float(max(maxSteps, 1));
     bg += pal_fire(time * uHueSpeed + glow) * glow * glow
