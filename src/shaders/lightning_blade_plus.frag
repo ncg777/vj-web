@@ -32,6 +32,10 @@ uniform vec3 uColorAccent;
 
 const float TAU = 6.28318530718;
 
+mat2 Rotate(float angle) {
+  return mat2(cos(angle), sin(angle), -sin(angle), cos(angle));
+}
+
 float CircleSDF(vec2 p, float r) {
   return length(p) - r;
 }
@@ -72,117 +76,90 @@ float SimpleNoise(vec2 uv, int octaves) {
   return sn / max(1e-4, deno);
 }
 
-float BoltMask(vec2 p, vec2 a, vec2 b, float width, float intensity) {
-  float dist = max(LineSDF(p, a, b, width), 1e-4);
-  return clamp(1.0 - exp(-(intensity / dist) * 0.03), 0.0, 1.0);
-}
+vec3 Bolt(vec2 uv, float len, float ind, float eventSeed) {
+  vec2 travel = vec2(0.0, eventSeed * uBoltNoiseSpeed * 3.0);
 
-vec3 FlashBolt(vec2 uv, float lane, float eventId, float localT) {
-  float flashSeed = lane * 19.73 + eventId * 31.17 + uSeed * 0.11;
-  vec2 span = vec2(uResolution.x / uResolution.y, 1.0) * 1.35;
-  vec2 anchor = vec2(
-    RandomFloat(vec2(flashSeed, 1.7)),
-    RandomFloat(vec2(flashSeed, 6.1))
+  float sn = SimpleNoise(
+    uv * uBoltNoiseScale - travel + vec2(ind * 1.5 + uSeed * 0.01 + eventSeed * 7.3, 0.0),
+    uNoiseOctaves
   ) * 2.0 - 1.0;
-  anchor *= span;
+  uv.x += sn * uBoltWiggle * smoothstep(0.0, 0.2, abs(uv.y));
 
-  float angle = RandomFloat(vec2(flashSeed, 9.9)) * TAU;
-  angle += (RandomFloat(vec2(flashSeed, 11.3)) - 0.5) * uAngleJitter;
-  vec2 tangent = vec2(cos(angle), sin(angle));
-  vec2 normal = vec2(-tangent.y, tangent.x);
+  vec3 l = vec3(LineSDF(uv, vec2(0.0), vec2(0.0, len), uBoltWidth));
+  l = uBoltIntensity / max(vec3(0.0), l) * uColorSecondary;
+  l = clamp(1.0 - exp(l * -0.02), 0.0, 1.0) * smoothstep(len - 0.01, 0.0, abs(uv.y));
+  vec3 bolt = l;
 
-  float len = mix(
-    uBoltLengthMin,
-    uBoltLengthMax,
-    RandomFloat(vec2(flashSeed, 14.7))
-  ) * 6.0 + 0.8;
-  len *= mix(0.85, 1.35, RandomFloat(vec2(flashSeed, 18.2)));
+  uv = Rotate(TAU * uTwist) * uv;
+  sn = SimpleNoise(
+    uv * (uBoltNoiseScale * 1.25) - travel * 1.2 + vec2(ind * 2.3 + uSeed * 0.03 + eventSeed * 5.1, 0.0),
+    uNoiseOctaves
+  ) * 2.0 - 1.0;
+  uv.x += sn * uv.y * uBoltSecondaryScale * smoothstep(0.1, 0.25, len);
+  len *= 0.5;
 
-  vec2 delta = uv - anchor;
-  vec2 local = vec2(dot(delta, tangent), dot(delta, normal));
-  float sweep = clamp(local.x / max(len, 1e-4), -0.5, 0.5);
+  l = vec3(LineSDF(uv, vec2(0.0), vec2(0.0, len), uBoltWidth * 0.8));
+  l = uBoltIntensity * 0.7 / max(vec3(0.0), l) * uColorAccent;
+  l = clamp(1.0 - exp(l * -0.03), 0.0, 1.0) * smoothstep(len * 0.7, 0.0, abs(uv.y));
+  bolt += l;
 
-  vec2 noisePos = vec2(
-    (sweep + 0.5) * uBoltNoiseScale * 5.0 + flashSeed * 0.23,
-    localT * (2.0 + uBoltNoiseSpeed * 1.3) + flashSeed * 0.07
-  );
-  float bend = SimpleNoise(noisePos, uNoiseOctaves) * 2.0 - 1.0;
-  float detail = SimpleNoise(noisePos * vec2(1.8, 1.3) + vec2(5.2, 11.7), uNoiseOctaves) * 2.0 - 1.0;
-  float bodyShape = mix(bend, detail, 0.45);
-  float taper = 1.0 - smoothstep(0.15, 0.55, abs(sweep));
-  local.y += bodyShape * (uBoltWiggle + uCoreNoiseAmp * 2.5) * (0.35 + 0.65 * taper);
-
-  float width = uBoltWidth * mix(1.4, 3.0, RandomFloat(vec2(flashSeed, 21.6))) + 0.00015;
-  float mainBolt = BoltMask(
-    local,
-    vec2(-0.5 * len, 0.0),
-    vec2(0.5 * len, 0.0),
-    width,
-    uBoltIntensity * 1.7
-  );
-
-  float branchPos = mix(-0.28, 0.22, RandomFloat(vec2(flashSeed, 24.1))) * len;
-  vec2 branchOrigin = vec2(branchPos, bodyShape * (uBoltWiggle * 0.7 + 0.01));
-  vec2 branchDir = normalize(vec2(
-    0.35 + RandomFloat(vec2(flashSeed, 27.4)) * 0.65,
-    mix(-1.0, 1.0, RandomFloat(vec2(flashSeed, 28.8))) + uTwist * 2.0
-  ));
-  float branchLen = len * mix(0.15, 0.42, RandomFloat(vec2(flashSeed, 30.5))) * (0.5 + 0.5 * uBoltSecondaryScale);
-  float branchBolt = BoltMask(
-    local,
-    branchOrigin,
-    branchOrigin + branchDir * branchLen,
-    width * 0.8,
-    uBoltIntensity * (0.7 + 0.6 * uBoltSecondaryScale)
-  );
-
-  float hotspotPos = mix(-0.3, 0.3, RandomFloat(vec2(flashSeed, 33.2))) * len;
-  vec2 hotspot = anchor + tangent * hotspotPos;
-  float sparkRadius = max(0.012, uCoreRadius * (5.0 + 6.0 * RandomFloat(vec2(flashSeed, 36.1))));
-  float spark = clamp(1.0 - exp(-(uCoreIntensity / max(CircleSDF(uv - hotspot, sparkRadius), 1e-4)) * 0.03), 0.0, 1.0);
-
-  float attack = smoothstep(0.01, 0.12, localT);
-  float sustain = 1.0 - smoothstep(0.16, 0.55, localT);
-  float crackle = 0.65 + 0.35 * sin(localT * TAU * (3.0 + RandomFloat(vec2(flashSeed, 39.4)) * 4.0));
-  float energy = attack * sustain * crackle;
-
-  vec3 col = vec3(0.0);
-  col += mainBolt * (uColorSecondary + vec3(0.28));
-  col += branchBolt * (uColorAccent + vec3(0.16));
-  col += spark * (uColorPrimary + vec3(0.25));
-
-  return col * energy;
+  return bolt;
 }
 
 void main() {
   vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution.xy) / uResolution.y;
   uv *= uZoom;
 
+  float aspect = uResolution.x / uResolution.y;
   float time = uTime * uTimeScale;
-  float cadence = 0.35 + max(uFlickerSpeed, 0.05) * 0.55;
   vec3 col = vec3(0.0);
-
-  float ambient = SimpleNoise(
-    uv * (uCoreNoiseScale * 0.18) + vec2(time * 0.07, -time * 0.05),
-    uNoiseOctaves
-  );
-  col += (0.015 + ambient * 0.02) * uColorPrimary;
 
   int count = max(uBoltCount, 1);
   for (int i = 0; i < 12; i++) {
     if (i >= count) {
       break;
     }
-    float lane = float(i);
-    float laneRate = mix(0.45, 1.45, RandomFloat(vec2(lane + uSeed, 41.0)));
-    float laneOffset = RandomFloat(vec2(lane + uSeed * 0.3, 44.0)) * 20.0;
-    float laneTime = time * cadence * laneRate + laneOffset;
+    float fi = float(i);
+
+    // Per-lane timing for erratic spawning
+    float laneRate = uFlickerSpeed * (0.7 + 0.6 * RandomFloat(vec2(fi + uSeed, 7.3)));
+    float lanePhase = RandomFloat(vec2(fi + uSeed * 0.5, 13.1)) * 20.0;
+    float laneTime = time * laneRate + lanePhase;
     float eventId = floor(laneTime);
     float localT = fract(laneTime);
-    float spawn = step(0.25, RandomFloat(vec2(eventId + lane * 3.7, 47.0 + uSeed)));
-    col += FlashBolt(uv, lane, eventId, localT) * spawn;
+
+    // Erratic spawn: not every event produces a flash
+    float spawnChance = RandomFloat(vec2(eventId + fi * 3.7, 17.0 + uSeed));
+    if (spawnChance < 0.3) continue;
+
+    // Flash envelope: quick attack, smooth decay
+    float flash = smoothstep(0.0, 0.05, localT) * (1.0 - smoothstep(0.1, 0.6, localT));
+
+    // Random anchor position seeded by event (spans entire screen)
+    vec2 anchor = vec2(
+      RandomFloat(vec2(eventId + fi, 21.0 + uSeed)) * 2.0 - 1.0,
+      RandomFloat(vec2(eventId + fi, 25.0 + uSeed)) * 2.0 - 1.0
+    ) * vec2(aspect * 0.5, 0.5);
+
+    // Random angle seeded by event
+    float angle = RandomFloat(vec2(eventId + fi, 29.0 + uSeed)) * TAU;
+    angle += (RandomFloat(vec2(eventId + fi, 33.0 + uSeed)) - 0.5) * uAngleJitter;
+
+    // Random length seeded by event
+    float len = mix(
+      uBoltLengthMin,
+      uBoltLengthMax,
+      RandomFloat(vec2(eventId + fi, 37.0 + uSeed))
+    );
+
+    // Transform UV relative to anchor and angle
+    vec2 localUV = Rotate(angle) * (uv - anchor);
+
+    // Event seed for shape variation (shape changes every flash)
+    float eventSeed = RandomFloat(vec2(eventId, fi + 41.0 + uSeed));
+
+    col += Bolt(localUV, len, fi, eventSeed) * flash;
   }
 
-  col = 1.0 - exp(-col * 1.2);
-  outColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+  outColor = vec4(col, 1.0);
 }
