@@ -3659,7 +3659,7 @@ export const animations: AnimationConfig[] = [
     id: "fractalReverie",
     name: "Fractal Reverie",
     description:
-      "Continuous fractal colour fields with smooth drifting motion and a saturated glowing backdrop.",
+      "Continuous fractal color fields with smooth drifting motion and a saturated glowing backdrop.",
     fragment: fractalReverieFrag,
     resolutionUniform: "uResolution",
     timeUniform: "uTime",
@@ -3720,17 +3720,6 @@ export const animations: AnimationConfig[] = [
         step: 0.01,
       },
       {
-        id: "raySteps",
-        label: "Ray Steps",
-        uniform: "uRaySteps",
-        type: "float",
-        value: 48.0,
-        min: 30.0,
-        max: 200.0,
-        step: 1.0,
-        key: { inc: "y", dec: "h", step: 10 },
-      },
-      {
         id: "detailLevel",
         label: "Detail Level",
         uniform: "uDetailLevel",
@@ -3750,16 +3739,6 @@ export const animations: AnimationConfig[] = [
         max: 5.0,
         step: 0.05,
         key: { inc: "u", dec: "j", step: 0.1, shiftStep: 0.5 },
-      },
-      {
-        id: "specPower",
-        label: "Spec Power",
-        uniform: "uSpecPower",
-        type: "float",
-        value: 32.0,
-        min: 2.0,
-        max: 128.0,
-        step: 1.0,
       },
       {
         id: "hueShift",

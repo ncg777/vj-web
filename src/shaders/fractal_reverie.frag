@@ -14,11 +14,9 @@ uniform float uFoldScale;
 uniform float uFoldOffset;
 uniform float uRotSpeed;
 
-uniform float uRaySteps;
 uniform float uDetailLevel;
 
 uniform float uLightIntensity;
-uniform float uSpecPower;
 
 uniform float uHueShift;
 uniform float uHueSpeed;
@@ -34,6 +32,8 @@ uniform float uCamHeight;
 uniform float uCamOrbit;
 
 const float TAU = 6.28318530718;
+const vec2 HASH_SCALE = vec2(234.34, 435.45);
+const float HASH_BIAS = 34.23;
 
 mat2 rot2(float a) {
     float s = sin(a);
@@ -42,8 +42,8 @@ mat2 rot2(float a) {
 }
 
 float hash21(vec2 p) {
-    p = fract(p * vec2(234.34, 435.45));
-    p += dot(p, p + 34.23 + fract(uSeed * 0.000001));
+    p = fract(p * HASH_SCALE);
+    p += dot(p, p + HASH_BIAS + fract(uSeed * 0.000001));
     return fract(p.x * p.y);
 }
 
