@@ -206,6 +206,39 @@ vec3 emissionPalette(float t) {
     return a + b * cos(TAU * (c * t + d));
 }
 
+float luminance(vec3 c) {
+    return dot(c, vec3(0.299, 0.587, 0.114));
+}
+
+vec3 oilPalette(float t) {
+    vec3 layerA = 0.5 + 0.5 * cos(TAU * (vec3(1.0, 1.25, 1.6) * t + vec3(0.02, 0.19, 0.37)));
+    vec3 layerB = 0.5 + 0.5 * cos(TAU * (vec3(0.75, 1.05, 1.45) * t + vec3(0.28, 0.47, 0.66)));
+    return mix(layerA, layerB, 0.5);
+}
+
+vec3 smokyOilColor(vec3 p, vec3 rd, vec3 lightDir, float density, float fracDist, float time, float seed) {
+    float shimmer = fbm(
+        p * 1.8 + vec3(
+            cos(time * 0.11 + p.z * 0.3),
+            sin(time * 0.13 + p.x * 0.4),
+            cos(time * 0.17 - p.y * 0.35)
+        ),
+        seed + 23.7,
+        uTurbulence
+    );
+    float pearl = 0.5 + 0.5 * cos(
+        fracDist * 24.0
+        - dot(rd, lightDir) * 5.0
+        + shimmer * 8.0
+        + time * (0.15 + uHueSpeed)
+    );
+    float baseParam = length(p) * 0.16 + density * 1.4 + time * uHueSpeed;
+    vec3 smokeBase = palette(baseParam);
+    vec3 smokeHaze = mix(vec3(luminance(smokeBase)), smokeBase, 0.35 + 0.4 * density);
+    vec3 iridescence = oilPalette(baseParam * 0.7 + shimmer * 0.45 + pearl * 0.6);
+    return mix(smokeHaze, iridescence, 0.35 + 0.45 * pearl);
+}
+
 // ──────────────────────────────────────────────────────────────
 // MAIN
 // ──────────────────────────────────────────────────────────────
@@ -218,8 +251,8 @@ void main() {
     float seed = uSeed;
 
     // ── Precompute fractal rotation matrices for this frame ──
-    fracRotXY = rot2(time * 0.15);
-    fracRotYZ = rot2(time * 0.11);
+    fracRotXY = rot2(time * (0.08 + uRotSpeed * 0.22));
+    fracRotYZ = rot2(time * (0.05 + uRotSpeed * 0.17));
 
     // ── Camera setup ──
     float orbitAngle = time * uCamOrbit;
@@ -275,11 +308,24 @@ void main() {
 
             // ── Color from position & density ──
             float colorParam = length(p) * 0.2 + density * 1.5 + time * uHueSpeed;
-            vec3 smokeCol = palette(colorParam) * uBrightness;
+            vec3 smokeCol = smokyOilColor(p, rd, lightDir, density, fracDist, time, seed) * uBrightness;
+            float pearl = 0.5 + 0.5 * cos(
+                fracDist * 30.0
+                + density * 7.0
+                - dot(rd, lightDir) * 4.5
+                + time * (0.12 + uHueSpeed)
+            );
+            vec3 oilSheen = oilPalette(colorParam * 0.75 + pearl * 0.55);
+            smokeCol = mix(smokeCol, oilSheen * (0.75 + 0.55 * pearl), 0.2 + 0.4 * density);
+            smokeCol = mix(vec3(luminance(smokeCol)), smokeCol, clamp(0.55 + 0.35 * uSaturation, 0.0, 1.4));
 
             // ── Emission near fractal surface (reuse fracDist) ──
             float emission = exp(-abs(fracDist) * 8.0) * uGlowIntensity;
-            vec3 emitCol = emissionPalette(colorParam + 0.3) * emission * 2.0;
+            vec3 emitCol = mix(
+                emissionPalette(colorParam + 0.3),
+                oilPalette(colorParam + 0.25 + pearl * 0.35),
+                0.55
+            ) * emission * 2.2;
 
             // ── Forward scattering (Henyey-Greenstein-like) ──
             float cosTheta = dot(rd, lightDir);
