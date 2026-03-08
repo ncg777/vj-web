@@ -259,15 +259,55 @@ vec3 shade(vec3 p, vec3 n, vec3 rd, vec4 trap,
     return col;
 }
 
+// ─── HASH FOR BG NOISE ──────────────────────────────────────
+float hash21(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+}
+
+float bgNoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0, 0.0));
+    float c = hash21(i + vec2(0.0, 1.0));
+    float d = hash21(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
 // ─── BACKGROUND ─────────────────────────────────────────────
 vec3 background(vec2 uv, vec3 rd, float time, int steps, int maxSteps) {
     float colorT = time * uHueSpeed * 0.3 + uHueShift;
-    float bgParam = length(uv) * 0.5 + colorT;
-    vec3 bg = pal_neon(bgParam) * 0.03 + pal_lava(bgParam + 0.3) * 0.02;
 
+    // ── Directional variation based on ray direction ──
+    float dirParam = atan(rd.y, rd.x) / TAU + 0.5;
+    float elevParam = rd.y * 0.5 + 0.5;
+
+    // ── Multi-scale noise for spatial variation ──
+    float n1 = bgNoise(uv * 3.0 + time * 0.05);
+    float n2 = bgNoise(uv * 7.0 - time * 0.08);
+    float n3 = bgNoise(uv * 1.5 + vec2(time * 0.03, -time * 0.02));
+    float noiseVal = n1 * 0.5 + n2 * 0.3 + n3 * 0.2;
+
+    // ── Base background with spatial variety ──
+    float bgParam = length(uv) * 0.3 + dirParam * 0.5 + colorT;
+    vec3 bg = pal_neon(bgParam + noiseVal * 0.4) * 0.05
+            + pal_lava(bgParam + 0.3 + noiseVal * 0.3) * 0.04
+            + pal_ice(elevParam + colorT + noiseVal) * 0.02;
+
+    // ── Nebula-like patches ──
+    float nebula = smoothstep(0.35, 0.65, noiseVal);
+    bg += pal_fire(colorT + noiseVal * 2.0) * nebula * 0.06;
+
+    // ── Step-based glow (near-miss glow around shapes) ──
     float glow = float(steps) / float(max(maxSteps, 1));
-    bg += pal_fire(time * uHueSpeed + glow) * glow * glow
-        * uGlowIntensity * 0.3;
+    bg += pal_fire(time * uHueSpeed + glow + noiseVal) * glow * glow
+        * uGlowIntensity * 0.4;
+
+    // ── Subtle directional gradient ──
+    bg += pal_lava(dirParam + colorT) * 0.015;
 
     return bg;
 }
