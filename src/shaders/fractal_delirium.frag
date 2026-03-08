@@ -43,6 +43,15 @@ uniform float uCamOrbit;
 const float PI      = 3.14159265;
 const float TAU     = 6.28318530;
 const float SAFE_R2 = 0.0001;  // epsilon preventing division by zero
+const vec3 DIAG_DIR = vec3(0.57735026919);
+const float FOLD_SMOOTH_BASE = 0.12;
+const float FOLD_SMOOTH_RANGE = 0.68;
+const float SPHERE_MIN_R2_BASE = 0.60;
+const float SPHERE_MIN_R2_RANGE = 0.45;
+const float SPHERE_FIXED_R2_BASE = 1.90;
+const float SPHERE_FIXED_R2_RANGE = 0.90;
+const float SPHERE_BAND_BASE = 0.03;
+const float SPHERE_BAND_RANGE = 0.16;
 
 // ─── MATH HELPERS ───────────────────────────────────────────
 mat2 rot2(float a) {
@@ -91,7 +100,6 @@ float fractalDE(vec3 p, float time) {
     vec3 offset = p;
     float dr = 1.0;
     float scale = uFoldScale;
-    vec3 diagDir = normalize(vec3(1.0, 1.0, 1.0));
 
     orbitTrap = vec4(1e10);
 
@@ -104,16 +112,16 @@ float fractalDE(vec3 p, float time) {
 
         // ── Box fold – C∞ smooth via softplus (no rectangular seams) ──
         // fold(p) = p − 2·softplus(p−1) + 2·softplus(−p−1)
-        float sk  = 0.12 + uSmoothBlend * 0.68;
+        float sk  = FOLD_SMOOTH_BASE + uSmoothBlend * FOLD_SMOOTH_RANGE;
         float sk2 = sk * sk;
         p = p - 2.0 * softplus(p - 1.0, sk2)
               + 2.0 * softplus(-p - 1.0, sk2);
 
         // ── Sphere fold – smoothstep-blended for continuous scaling ──
         float r2 = dot(p, p);
-        float minR2   = 0.60 + uSmoothBlend * 0.45;
-        float fixedR2 = 1.90 + uSmoothBlend * 0.90;
-        float sband   = 0.03 + uSmoothBlend * 0.16;
+        float minR2   = SPHERE_MIN_R2_BASE + uSmoothBlend * SPHERE_MIN_R2_RANGE;
+        float fixedR2 = SPHERE_FIXED_R2_BASE + uSmoothBlend * SPHERE_FIXED_R2_RANGE;
+        float sband   = SPHERE_BAND_BASE + uSmoothBlend * SPHERE_BAND_RANGE;
         float innerW  = smoothstep(minR2  - sband, minR2  + sband, r2);
         float outerW  = smoothstep(fixedR2 - sband, fixedR2 + sband, r2);
         float sf      = mix(fixedR2 / minR2,
@@ -124,7 +132,7 @@ float fractalDE(vec3 p, float time) {
         dr *= sf;
 
         // ── Accumulate orbit traps for coloring ──
-        vec3 diagDelta = p - diagDir * dot(p, diagDir);
+        vec3 diagDelta = p - DIAG_DIR * dot(p, DIAG_DIR);
         orbitTrap = min(orbitTrap, vec4(
             length(p.xy),
             length(p.yz),
