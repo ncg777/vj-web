@@ -44,66 +44,65 @@ float fbm(vec2 p) {
   return sum;
 }
 
-float loopTime(float t, float duration) {
-  float phase = mod(t, duration) / duration;
-  return phase * TAU;
+vec3 tunnelPalette(float t) {
+  return 0.5 + 0.5 * cos(TAU * (t + vec3(0.0, 0.17, 0.36)));
 }
 
 void main() {
   vec2 uv = (gl_FragCoord.xy - 0.5 * iResolution.xy) / iResolution.y;
 
-  float t = loopTime(iTime * uSpeed, uLoopDuration);
-  float phase = t / TAU;
+  float phase = mod(iTime, uLoopDuration) / max(uLoopDuration, 0.001);
+  float theta = phase * TAU;
+  vec2 loopA = vec2(cos(theta), sin(theta));
+  vec2 loopB = vec2(cos(2.0 * theta + 0.7), sin(3.0 * theta - 0.5));
 
-  float r = length(uv);
+  float baseR = length(uv);
   float a = atan(uv.y, uv.x);
-  a += uTwist * r;
+  float twist = uTwist * (0.65 + 0.35 * loopA.x);
+  a += twist * baseR + 0.25 * loopB.y;
 
   vec2 dir = vec2(cos(a), sin(a));
-  vec2 tOff = vec2(cos(t), sin(t)) * (0.6 * uNoiseScale);
-  vec2 np = dir * (0.75 * uNoiseScale) + tOff + r * (2.0 * uNoiseScale);
+  vec2 flow = loopA * (0.7 + 0.3 * uSpeed) + loopB * (0.25 + 0.2 * uSpeed);
+  vec2 np = dir * (0.9 * uNoiseScale) + uv * (2.2 * uNoiseScale) + flow * (0.75 * uNoiseScale);
   float n = fbm(np);
-  r += uNoiseAmp * n;
-  a += uNoiseAmp * 0.5 * n;
+  float n2 = fbm(np * 1.9 + loopB * 3.0 + loopA.yx * 1.7);
 
-  float stripePhase = fract(phase + r * 0.5);
-  float stripe = smoothstep(0.3, 0.5, sin(a * 8.0 + stripePhase * TAU));
+  float r = baseR + uNoiseAmp * ((n - 0.5) * 1.4 + (n2 - 0.5) * 0.8);
+  float lane = 0.5 + 0.5 * sin(a * 9.0 + n * 4.0 + 2.8 * loopB.x);
+  float rings = 0.5 + 0.5 * cos(r * 22.0 - n2 * 5.5 + 2.2 * loopA.y);
+  float tunnel = smoothstep(0.28, 0.92, lane * 0.75 + rings * 0.95);
 
-  vec3 baseHue = uBaseColor;
-  vec3 dynamicHue = 0.5 + 0.5 * cos(vec3(0.0, 0.6, 1.2) + a * 2.0 + n * 2.0 + uColorCycle * t);
-  vec3 col = mix(baseHue, dynamicHue, 0.7);
+  float huePhase = a / TAU + 0.25 * n + 0.12 * n2 + 0.12 * uColorCycle * loopA.y;
+  vec3 dynamicHue = tunnelPalette(huePhase);
+  vec3 oilHue = tunnelPalette(huePhase + 0.12 * loopB.x + 0.08 * loopA.y);
+  vec3 col = mix(uBaseColor, dynamicHue, 0.45);
+  col = mix(col, oilHue, 0.45 + 0.25 * lane);
+  col = mix(col, vec3(1.0), 0.55 * tunnel);
 
-  float stripeMask = stripe;
-  col = mix(col, vec3(1.0), 0.6 * stripeMask);
-
-  float fogBase = exp(-r * uFogDensity);
-  float glowBase = pow(fogBase, 2.0);
+  float fogBase = exp(-baseR * uFogDensity);
+  float glowBase = pow(fogBase, 1.8);
   float e = 0.003 * max(0.5, uNoiseScale);
   vec2 grad;
   grad.x = fbm(np + vec2(e, 0.0)) - fbm(np - vec2(e, 0.0));
   grad.y = fbm(np + vec2(0.0, e)) - fbm(np - vec2(0.0, e));
   vec2 normal2D = normalize(grad + vec2(1e-6));
-  float refractStrength = 0.03;
-  vec2 uvR = uv + normal2D * refractStrength * (0.3 + 0.7 * glowBase);
+  vec2 uvR = uv + normal2D * (0.028 + 0.02 * glowBase);
 
   float rR = length(uvR);
-  float aR = atan(uvR.y, uvR.x);
-  aR += uTwist * rR;
+  float aR = atan(uvR.y, uvR.x) + twist * rR + 0.25 * loopB.x;
   vec2 dirR = vec2(cos(aR), sin(aR));
-  vec2 npR = dirR * (0.75 * uNoiseScale) + tOff + rR * (2.0 * uNoiseScale);
+  vec2 npR = dirR * (0.9 * uNoiseScale) + uvR * (2.2 * uNoiseScale) + flow * (0.75 * uNoiseScale);
   float nR = fbm(npR);
-  float stripePhaseR = fract(phase + rR * 0.5);
-  float stripeR = smoothstep(0.3, 0.5, sin(aR * 8.0 + stripePhaseR * TAU));
-  vec3 dynamicHueR = 0.5 + 0.5 * cos(vec3(0.0, 0.6, 1.2) + aR * 2.0 + nR * 2.0 + uColorCycle * t);
-  vec3 colR = mix(baseHue, dynamicHueR, 0.7);
-  colR = mix(colR, vec3(1.0), 0.6 * stripeR);
+  float nR2 = fbm(npR * 1.9 + loopB * 3.0 + loopA.yx * 1.7);
+  float laneR = 0.5 + 0.5 * sin(aR * 9.0 + nR * 4.0 + 2.8 * loopA.x);
+  float ringsR = 0.5 + 0.5 * cos(rR * 22.0 - nR2 * 5.5 + 2.2 * loopB.y);
+  vec3 colR = mix(uBaseColor, tunnelPalette(aR / TAU + 0.25 * nR + 0.12 * nR2 + 0.12 * uColorCycle * loopB.x), 0.45);
+  colR = mix(colR, tunnelPalette(aR / TAU + 0.14 * loopA.x + 0.08 * nR), 0.45 + 0.25 * laneR);
+  colR = mix(colR, vec3(1.0), 0.45 * smoothstep(0.28, 0.92, laneR * 0.75 + ringsR * 0.95));
 
-  col = mix(col, colR, 0.6);
-
-  float fog = fogBase;
-  float glow = glowBase;
-  col *= mix(0.6, 1.6, fog);
-  col += glow * 0.35 * (0.6 * baseHue + 0.4 * dynamicHue);
+  col = mix(col, colR, 0.58);
+  col *= mix(0.55, 1.7, fogBase);
+  col += glowBase * 0.32 * (0.5 * dynamicHue + 0.5 * oilHue);
 
   col = clamp(col, 0.0, 1.0);
   outColor = vec4(col, 1.0);
