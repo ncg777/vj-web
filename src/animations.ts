@@ -18,7 +18,7 @@ import mandelbulbInsidePlusFrag from "./shaders/mandelbulb_inside_plus.frag?raw"
 import aurorasPlusFrag from "./shaders/auroras_plus.frag?raw";
 import fractalFoldFrag from "./shaders/fractal_fold_raymarch.frag?raw";
 import hadamardDiskFrag from "./shaders/hadamard_disk.frag?raw";
-import laplacianFractalAdvFrag from "./shaders/laplacian_fractal_advection.frag?raw";
+import fractalDeliriumFrag from "./shaders/fractal_delirium.frag?raw";
 import polarRoseFrag from "./shaders/polar_rose.frag?raw";
 
 export type KeyBinding = {
@@ -3660,7 +3660,7 @@ export const animations: AnimationConfig[] = [
     name: "Fractal Delirium",
     description:
       "Kaleidoscopic IFS fractal with orbit-trap psychedelic coloring, chromatic aberration, multi-palette lighting, and razor-sharp geometry.",
-    fragment: laplacianFractalAdvFrag,
+    fragment: fractalDeliriumFrag,
     resolutionUniform: "uResolution",
     timeUniform: "uTime",
     timeMode: "seconds",
@@ -3735,9 +3735,9 @@ export const animations: AnimationConfig[] = [
         label: "Ray Steps",
         uniform: "uRaySteps",
         type: "float",
-        value: 120.0,
+        value: 64.0,
         min: 30.0,
-        max: 300.0,
+        max: 200.0,
         step: 1.0,
         key: { inc: "y", dec: "h", step: 10 },
       },

@@ -153,24 +153,24 @@ vec3 calcNormal(vec3 p, float time) {
 float calcAO(vec3 p, vec3 n, float time) {
     float occ = 0.0;
     float sca = 1.0;
-    for (int i = 0; i < 5; i++) {
-        float h = 0.01 + 0.12 * float(i) / 4.0;
+    for (int i = 0; i < 3; i++) {
+        float h = 0.01 + 0.15 * float(i) / 2.0;
         float d = fractalDE(p + n * h, time);
         occ += (h - d) * sca;
-        sca *= 0.95;
+        sca *= 0.9;
     }
     return clamp(1.0 - 3.0 * occ, 0.0, 1.0);
 }
 
-// ─── SINGLE-CHANNEL RAYMARCH (for chromatic aberration) ─────
-float marchChannel(vec3 ro, vec3 rd, float time, int maxSteps,
-                   out vec3 hitPos, out vec3 hitNorm,
-                   out vec4 hitTrap, out int hitSteps) {
+// ─── RAYMARCH ────────────────────────────────────────────────
+float march(vec3 ro, vec3 rd, float time, int maxSteps,
+            out vec3 hitPos, out vec3 hitNorm,
+            out vec4 hitTrap, out int hitSteps) {
     float t = 0.0;
     float d = 0.0;
     hitSteps = 0;
 
-    for (int i = 0; i < 300; i++) {
+    for (int i = 0; i < 200; i++) {
         if (i >= maxSteps) break;
         vec3 p = ro + rd * t;
         d = fractalDE(p, time);
@@ -181,7 +181,7 @@ float marchChannel(vec3 ro, vec3 rd, float time, int maxSteps,
             hitSteps = i;
             return t;
         }
-        t += d * 0.7;
+        t += d * 0.8;
         hitSteps = i;
         if (t > 20.0) break;
     }
@@ -280,33 +280,26 @@ void main() {
     vec3 right = normalize(cross(fwd, vec3(0.0, 1.0, 0.0)));
     vec3 up    = cross(right, fwd);
 
-    // ── Chromatic aberration: three ray directions ──
-    float ca = uChromaShift * 0.003;
-    vec3 rdR = normalize(fwd + (uv.x + ca) * right + uv.y * up);
-    vec3 rdG = normalize(fwd +  uv.x       * right + uv.y * up);
-    vec3 rdB = normalize(fwd + (uv.x - ca) * right + uv.y * up);
+    // ── Single-ray march ──
+    vec3 rd = normalize(fwd + uv.x * right + uv.y * up);
 
-    // ── March each channel ──
-    vec3 pR, nR, pG, nG, pB, nB;
-    vec4 tR, tG, tB;
-    int sR, sG, sB;
-
-    float dR = marchChannel(ro, rdR, time, maxSteps, pR, nR, tR, sR);
-    float dG = marchChannel(ro, rdG, time, maxSteps, pG, nG, tG, sG);
-    float dB = marchChannel(ro, rdB, time, maxSteps, pB, nB, tB, sB);
+    vec3 hitPos, hitNorm;
+    vec4 hitTrap;
+    int hitSteps;
+    float d = march(ro, rd, time, maxSteps, hitPos, hitNorm, hitTrap, hitSteps);
 
     vec3 col;
+    if (d > 0.0) {
+        col = shade(hitPos, hitNorm, rd, hitTrap, hitSteps, maxSteps, time);
+    } else {
+        col = background(uv, rd, time, hitSteps, maxSteps);
+    }
 
-    // ── Shade each channel ──
-    col.r = (dR > 0.0)
-        ? shade(pR, nR, rdR, tR, sR, maxSteps, time).r
-        : background(uv, rdR, time, sR, maxSteps).r;
-    col.g = (dG > 0.0)
-        ? shade(pG, nG, rdG, tG, sG, maxSteps, time).g
-        : background(uv, rdG, time, sG, maxSteps).g;
-    col.b = (dB > 0.0)
-        ? shade(pB, nB, rdB, tB, sB, maxSteps, time).b
-        : background(uv, rdB, time, sB, maxSteps).b;
+    // ── Screen-space chromatic aberration ──
+    float ca = uChromaShift * 0.003;
+    float r2 = dot(uv, uv);
+    col.r *= 1.0 + ca * r2 * 2.0;
+    col.b *= 1.0 - ca * r2 * 2.0;
 
     // ── Contrast ──
     col = mix(vec3(0.5), col, uContrast);
