@@ -15,7 +15,6 @@ uniform int   uFractalIters;
 uniform float uFoldScale;
 uniform float uFoldOffset;
 uniform float uRotSpeed;
-uniform float uKaleidoFolds;
 
 // Rendering
 uniform float uRaySteps;
@@ -81,7 +80,7 @@ vec3 pal_ice(float t) {
 vec4 orbitTrap;
 
 // ─── FRACTAL DISTANCE ESTIMATOR ─────────────────────────────
-// Hybrid Mandelbox / Kaleidoscopic IFS with orbit traps
+// Hybrid Mandelbox IFS with orbit traps
 float fractalDE(vec3 p, float time) {
     vec3 offset = p;
     float dr = 1.0;
@@ -93,22 +92,8 @@ float fractalDE(vec3 p, float time) {
     mat2 rYZ = rot2(time * (0.006 + uRotSpeed * 0.022));
     mat2 rXZ = rot2(time * (0.008 + uRotSpeed * 0.026));
 
-    float kalAngle = PI / max(uKaleidoFolds, 1.5);
-
     for (int i = 0; i < 16; i++) {
         if (i >= uFractalIters) break;
-
-        // ── Kaleidoscopic fold ──
-        p = abs(p);
-        float angle = atan(p.y, p.x);
-        angle = mod(angle + kalAngle * 0.5, kalAngle) - kalAngle * 0.5;
-        float r = length(p.xy);
-        p.xy = vec2(cos(angle), sin(angle)) * r;
-
-        // ── Menger-style conditional folds ──
-        if (p.x < p.y) p.xy = p.yx;
-        if (p.x < p.z) p.xz = p.zx;
-        if (p.y < p.z) p.yz = p.zy;
 
         // ── Box fold – smooth near boundary for lava-lamp softness ──
         float sk = max(uSmoothBlend * 0.5, 0.01);

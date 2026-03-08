@@ -3720,17 +3720,6 @@ export const animations: AnimationConfig[] = [
         step: 0.01,
       },
       {
-        id: "kaleidoFolds",
-        label: "Kaleido Folds",
-        uniform: "uKaleidoFolds",
-        type: "float",
-        value: 1.5,
-        min: 1.5,
-        max: 12.0,
-        step: 0.1,
-        key: { inc: "t", dec: "g", step: 0.5, shiftStep: 1.0 },
-      },
-      {
         id: "raySteps",
         label: "Ray Steps",
         uniform: "uRaySteps",
