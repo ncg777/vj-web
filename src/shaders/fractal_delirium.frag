@@ -40,8 +40,9 @@ uniform float uCamHeight;
 uniform float uCamOrbit;
 
 // ─── CONSTANTS ──────────────────────────────────────────────
-const float PI  = 3.14159265;
-const float TAU = 6.28318530;
+const float PI      = 3.14159265;
+const float TAU     = 6.28318530;
+const float SAFE_R2 = 0.0001;  // epsilon preventing division by zero
 
 // ─── MATH HELPERS ───────────────────────────────────────────
 mat2 rot2(float a) {
@@ -52,6 +53,11 @@ mat2 rot2(float a) {
 float smin(float a, float b, float k) {
     float h = max(k - abs(a - b), 0.0) / k;
     return min(a, b) - h * h * h * k * (1.0 / 6.0);
+}
+
+// Smooth approximation of max(x, 0): C∞ everywhere
+vec3 softplus(vec3 x, float k2) {
+    return 0.5 * (x + sqrt(x * x + k2));
 }
 
 // ─── PSYCHEDELIC COLOR PALETTES ─────────────────────────────
@@ -96,14 +102,11 @@ float fractalDE(vec3 p, float time) {
         if (i >= uFractalIters) break;
 
         // ── Box fold – C∞ smooth via softplus (no rectangular seams) ──
-        // softplus(x,k) = 0.5*(x + sqrt(x*x + k*k)) ≈ max(x,0)
         // fold(p) = p − 2·softplus(p−1) + 2·softplus(−p−1)
         float sk  = max(uSmoothBlend * 0.8, 0.05);
         float sk2 = sk * sk;
-        vec3 hi   = p - 1.0;
-        vec3 lo   = -p - 1.0;
-        p = p - 2.0 * (0.5 * (hi + sqrt(hi * hi + sk2)))
-              + 2.0 * (0.5 * (lo + sqrt(lo * lo + sk2)));
+        p = p - 2.0 * softplus(p - 1.0, sk2)
+              + 2.0 * softplus(-p - 1.0, sk2);
 
         // ── Sphere fold – smoothstep-blended for continuous scaling ──
         float r2 = dot(p, p);
@@ -113,7 +116,7 @@ float fractalDE(vec3 p, float time) {
         float innerW  = smoothstep(minR2  - sband, minR2  + sband, r2);
         float outerW  = smoothstep(fixedR2 - sband, fixedR2 + sband, r2);
         float sf      = mix(fixedR2 / minR2,
-                            fixedR2 / max(r2, 0.0001),
+                            fixedR2 / max(r2, SAFE_R2),
                             innerW);
         sf = mix(sf, 1.0, outerW);
         p  *= sf;
