@@ -40,8 +40,9 @@ uniform float uCamHeight;
 uniform float uCamOrbit;
 
 // ─── CONSTANTS ──────────────────────────────────────────────
-const float PI  = 3.14159265;
-const float TAU = 6.28318530;
+const float PI      = 3.14159265;
+const float TAU     = 6.28318530;
+const float SAFE_R2 = 0.0001;  // epsilon preventing division by zero
 
 // ─── MATH HELPERS ───────────────────────────────────────────
 mat2 rot2(float a) {
@@ -52,6 +53,11 @@ mat2 rot2(float a) {
 float smin(float a, float b, float k) {
     float h = max(k - abs(a - b), 0.0) / k;
     return min(a, b) - h * h * h * k * (1.0 / 6.0);
+}
+
+// Smooth approximation of max(x, 0): C∞ everywhere
+vec3 softplus(vec3 x, float k2) {
+    return 0.5 * (x + sqrt(x * x + k2));
 }
 
 // ─── PSYCHEDELIC COLOR PALETTES ─────────────────────────────
@@ -95,22 +101,26 @@ float fractalDE(vec3 p, float time) {
     for (int i = 0; i < 16; i++) {
         if (i >= uFractalIters) break;
 
-        // ── Box fold – smooth near boundary for lava-lamp softness ──
-        float sk = max(uSmoothBlend * 0.5, 0.01);
-        vec3 wt = smoothstep(vec3(1.0 - sk), vec3(1.0 + sk), abs(p));
-        p = mix(p, sign(p) * (2.0 - abs(p)), wt);
+        // ── Box fold – C∞ smooth via softplus (no rectangular seams) ──
+        // fold(p) = p − 2·softplus(p−1) + 2·softplus(−p−1)
+        float sk  = max(uSmoothBlend * 0.8, 0.05);
+        float sk2 = sk * sk;
+        p = p - 2.0 * softplus(p - 1.0, sk2)
+              + 2.0 * softplus(-p - 1.0, sk2);
 
-        // ── Sphere fold – enlarged radii so blobs are big and merge ──
+        // ── Sphere fold – smoothstep-blended for continuous scaling ──
         float r2 = dot(p, p);
-        float minR2  = 0.45 + uSmoothBlend * 0.35;   // inner: ~0.45-0.80
-        float fixedR2 = 1.6 + uSmoothBlend * 0.60;   // outer: ~1.60-2.20
-        if (r2 < minR2) {
-            float t = fixedR2 / minR2;
-            p *= t;  dr *= t;
-        } else if (r2 < fixedR2) {
-            float t = fixedR2 / r2;
-            p *= t;  dr *= t;
-        }
+        float minR2   = 0.45 + uSmoothBlend * 0.35;
+        float fixedR2 = 1.6  + uSmoothBlend * 0.60;
+        float sband   = max(uSmoothBlend * 0.15, 0.01);
+        float innerW  = smoothstep(minR2  - sband, minR2  + sband, r2);
+        float outerW  = smoothstep(fixedR2 - sband, fixedR2 + sband, r2);
+        float sf      = mix(fixedR2 / minR2,
+                            fixedR2 / max(r2, SAFE_R2),
+                            innerW);
+        sf = mix(sf, 1.0, outerW);
+        p  *= sf;
+        dr *= sf;
 
         // ── Accumulate orbit traps for coloring ──
         orbitTrap = min(orbitTrap, vec4(
