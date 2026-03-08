@@ -91,6 +91,7 @@ float fractalDE(vec3 p, float time) {
     vec3 offset = p;
     float dr = 1.0;
     float scale = uFoldScale;
+    vec3 diagDir = normalize(vec3(1.0, 1.0, 1.0));
 
     orbitTrap = vec4(1e10);
 
@@ -103,16 +104,16 @@ float fractalDE(vec3 p, float time) {
 
         // ── Box fold – C∞ smooth via softplus (no rectangular seams) ──
         // fold(p) = p − 2·softplus(p−1) + 2·softplus(−p−1)
-        float sk  = max(uSmoothBlend * 0.8, 0.05);
+        float sk  = 0.12 + uSmoothBlend * 0.68;
         float sk2 = sk * sk;
         p = p - 2.0 * softplus(p - 1.0, sk2)
               + 2.0 * softplus(-p - 1.0, sk2);
 
         // ── Sphere fold – smoothstep-blended for continuous scaling ──
         float r2 = dot(p, p);
-        float minR2   = 0.45 + uSmoothBlend * 0.35;
-        float fixedR2 = 1.6  + uSmoothBlend * 0.60;
-        float sband   = max(uSmoothBlend * 0.15, 0.01);
+        float minR2   = 0.60 + uSmoothBlend * 0.45;
+        float fixedR2 = 1.90 + uSmoothBlend * 0.90;
+        float sband   = 0.03 + uSmoothBlend * 0.16;
         float innerW  = smoothstep(minR2  - sband, minR2  + sband, r2);
         float outerW  = smoothstep(fixedR2 - sband, fixedR2 + sband, r2);
         float sf      = mix(fixedR2 / minR2,
@@ -123,11 +124,12 @@ float fractalDE(vec3 p, float time) {
         dr *= sf;
 
         // ── Accumulate orbit traps for coloring ──
+        vec3 diagDelta = p - diagDir * dot(p, diagDir);
         orbitTrap = min(orbitTrap, vec4(
-            abs(p.x),
-            length(p.xz),
+            length(p.xy),
+            length(p.yz),
             dot(p, p),
-            abs(p.z - p.x)
+            length(diagDelta)
         ));
 
         // ── Rotate ──
@@ -159,8 +161,8 @@ vec3 calcNormal(vec3 p, float time) {
 float calcAO(vec3 p, vec3 n, float time) {
     float occ = 0.0;
     float sca = 1.0;
-    for (int i = 0; i < 3; i++) {
-        float h = 0.01 + 0.15 * float(i) / 2.0;
+    for (int i = 0; i < 2; i++) {
+        float h = 0.015 + 0.10 * float(i);
         float d = fractalDE(p + n * h, time);
         occ += (h - d) * sca;
         sca *= 0.9;
