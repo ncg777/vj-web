@@ -18,7 +18,7 @@ import mandelbulbInsidePlusFrag from "./shaders/mandelbulb_inside_plus.frag?raw"
 import aurorasPlusFrag from "./shaders/auroras_plus.frag?raw";
 import fractalFoldFrag from "./shaders/fractal_fold_raymarch.frag?raw";
 import hadamardDiskFrag from "./shaders/hadamard_disk.frag?raw";
-import fractalDeliriumFrag from "./shaders/fractal_delirium.frag?raw";
+import fractalReverieFrag from "./shaders/fractal_reverie.frag?raw";
 import polarRoseFrag from "./shaders/polar_rose.frag?raw";
 
 export type KeyBinding = {
@@ -3656,11 +3656,11 @@ export const animations: AnimationConfig[] = [
     ],
   },
   {
-    id: "fractalDelirium",
-    name: "Fractal Delirium",
+    id: "fractalReverie",
+    name: "Fractal Reverie",
     description:
-      "Slow-moving lava-lamp fractal: large glowing blobs melt and fuse together in rich, saturated colours with smooth orbit-trap shading.",
-    fragment: fractalDeliriumFrag,
+      "Continuous fractal color fields with smooth drifting motion and a saturated glowing backdrop.",
+    fragment: fractalReverieFrag,
     resolutionUniform: "uResolution",
     timeUniform: "uTime",
     timeMode: "seconds",
@@ -3720,17 +3720,6 @@ export const animations: AnimationConfig[] = [
         step: 0.01,
       },
       {
-        id: "raySteps",
-        label: "Ray Steps",
-        uniform: "uRaySteps",
-        type: "float",
-        value: 48.0,
-        min: 30.0,
-        max: 200.0,
-        step: 1.0,
-        key: { inc: "y", dec: "h", step: 10 },
-      },
-      {
         id: "detailLevel",
         label: "Detail Level",
         uniform: "uDetailLevel",
@@ -3750,16 +3739,6 @@ export const animations: AnimationConfig[] = [
         max: 5.0,
         step: 0.05,
         key: { inc: "u", dec: "j", step: 0.1, shiftStep: 0.5 },
-      },
-      {
-        id: "specPower",
-        label: "Spec Power",
-        uniform: "uSpecPower",
-        type: "float",
-        value: 32.0,
-        min: 2.0,
-        max: 128.0,
-        step: 1.0,
       },
       {
         id: "hueShift",
