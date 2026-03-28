@@ -154,21 +154,44 @@ void main() {
     if (i >= count) break;
     float fi = float(i);
 
-    float laneRate  = uFlickerSpeed * (0.5 + 0.8 * hash(vec2(fi + uSeed, 7.3)));
-    float lanePhase = hash(vec2(fi + uSeed * 0.5, 13.1)) * 30.0;
-    float laneTime  = time * laneRate + lanePhase;
-    float eventId   = floor(laneTime);
-    float localT    = fract(laneTime);
+    // Chaotic timing: scan a small window of candidate event indices
+    // and treat each candidate time as (index + jitter)/rate. This
+    // produces irregular, non-periodic strike times while remaining
+    // deterministic and cheap to evaluate in a shader.
+    float laneSeed = fi + uSeed * 0.37;
+    float maxRate = max(0.08, uFlickerSpeed * 1.2);
+    float baseIdxF = floor(time * maxRate);
+    bool eventFound = false;
+    float eventId = 0.0;
+    float localT = 0.0;
+    float flash = 0.0;
+    float flicker = 1.0;
 
-    float spawnChance = hash(vec2(eventId + fi * 3.7, 17.0 + uSeed));
-    if (spawnChance < 0.55) continue;
+    // check a few recent candidate events (most recent first)
+    for (int k = 0; k < 8; k++) {
+      float idxF = baseIdxF - float(k);
+      float jitter = hash(vec2(idxF + laneSeed, 99.9));
+      float eventTime = (idxF + jitter) / maxRate;
+      float lt = (time - eventTime) * maxRate; // normalized local time in [0,1)
+      if (lt >= 0.0 && lt < 1.0) {
+        float spawnChance = hash(vec2(idxF + fi * 3.7, 17.0 + uSeed));
+        if (spawnChance < 0.55) {
+          break; // candidate didn't spawn this time
+        }
+        eventId = idxF;
+        localT = lt;
+        flash = smoothstep(0.0, 0.02, localT) * (1.0 - smoothstep(0.05, 0.4, localT));
+        flicker = 1.0 - 0.3 * smoothstep(0.0, 1.0, sin(localT * 40.0 + fi * 10.0));
+        flash *= flicker;
+        if (flash < 0.001) {
+          break;
+        }
+        eventFound = true;
+        break;
+      }
+    }
 
-    float flash   = smoothstep(0.0, 0.02, localT)
-                  * (1.0 - smoothstep(0.05, 0.4, localT));
-    float flicker = 1.0 - 0.3 * smoothstep(0.0, 1.0,
-                        sin(localT * 40.0 + fi * 10.0));
-    flash *= flicker;
-    if (flash < 0.001) continue;
+    if (!eventFound) continue;
 
     vec2 startPos = vec2(
       hash(vec2(eventId + fi, 21.0 + uSeed)) * 2.0 - 1.0,
