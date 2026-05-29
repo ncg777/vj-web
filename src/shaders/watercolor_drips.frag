@@ -51,6 +51,11 @@ uniform float uPaperBlotchAmount;
 uniform float uVignetteStrength;
 
 const float TAU = 6.28318530718;
+const float EPSILON = 0.001;
+const float MIN_FALLOFF = 0.01;
+const float SATELLITE_TRAIL_BASE = 0.3;
+const float SATELLITE_TRAIL_STEP = 0.35;
+const float SATELLITE_LAG_SPAN = 0.08;
 const int MAX_DRIP_COUNT = 36;
 const int MAX_SATELLITES = 4;
 
@@ -102,6 +107,10 @@ vec3 hsv2rgb(vec3 c) {
   return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
 }
 
+float twirlOffset(float y, float phase) {
+  return sin(y * uTwistFrequency * TAU + phase) * uTwistAmount * pow(clamp(y, 0.0, 1.0), max(uTwirlFalloff, MIN_FALLOFF));
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / uResolution.xy;
 
@@ -133,7 +142,7 @@ void main() {
     float fi = float(i) + 1.0;
     float lane = mix(0.08, 0.92, hash11(fi * 7.13));
     float cycle = mix(uCycleMin, uCycleMax, hash11(fi * 2.71));
-    float phase = fract(uTime / max(cycle, 0.001) + hash11(fi * 11.9));
+    float phase = fract(uTime / max(cycle, EPSILON) + hash11(fi * 11.9));
     float dripActive = smoothstep(0.01, 0.08, phase) * (1.0 - smoothstep(0.8, 0.98, phase));
     float travel = pow(phase, mix(uTravelGammaMin, uTravelGammaMax, hash11(fi * 5.37)));
     float headY = mix(-0.24, 1.16, travel);
@@ -144,8 +153,8 @@ void main() {
     float detailAmp = uDetailSwayAmplitude * mix(0.7, 1.3, hash11(fi * 29.3));
     float detailFreq = uDetailSwayFrequency * mix(0.7, 1.3, hash11(fi * 31.7));
     float twistPhase = fi * 0.7 + uTime * uTwirlSpeed;
-    float staticTwist = sin(uv.y * uTwistFrequency * TAU + twistPhase) * uTwistAmount * pow(clamp(uv.y, 0.0, 1.0), max(uTwirlFalloff, 0.01));
-    float headTwist = sin(headY * uTwistFrequency * TAU + twistPhase) * uTwistAmount * pow(clamp(headY, 0.0, 1.0), max(uTwirlFalloff, 0.01));
+    float staticTwist = twirlOffset(uv.y, twistPhase);
+    float headTwist = twirlOffset(headY, twistPhase);
     float staticFlow = (uv.y - 0.5) * uFlowTilt;
     float headFlow = (headY - 0.5) * uFlowTilt;
 
@@ -197,7 +206,7 @@ void main() {
       }
       float fj = float(j) + 1.0;
       float lag = fract(phase + 0.23 * fj + hash11(fi * 41.3 + fj));
-      float satY = headY - trailLength * (0.3 + 0.35 * fj) - lag * 0.08;
+      float satY = headY - trailLength * (SATELLITE_TRAIL_BASE + SATELLITE_TRAIL_STEP * fj) - lag * SATELLITE_LAG_SPAN;
       float satX = headSpine + (hash11(fi * 43.7 + fj) - 0.5) * trailWidth * uSatelliteSpread;
       float satR = radius * mix(uSatelliteSizeMin, uSatelliteSizeMax, hash11(fi * 47.1 + fj));
       vec2 satOffset = vec2((uv.x - satX) / satR, (uv.y - satY) / (satR * 1.2));
