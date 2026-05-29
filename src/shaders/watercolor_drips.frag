@@ -91,6 +91,10 @@ float noise(vec2 p) {
   return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
+float signedNoise(vec2 p) {
+  return noise(p) * 2.0 - 1.0;
+}
+
 float fbm(vec2 p) {
   float value = 0.0;
   float amplitude = 0.5;
@@ -109,6 +113,20 @@ vec3 hsv2rgb(vec3 c) {
 
 float twirlOffset(float y, float phase) {
   return sin(y * uTwistFrequency * TAU + phase) * uTwistAmount * pow(clamp(y, 0.0, 1.0), max(uTwirlFalloff, MIN_FALLOFF));
+}
+
+float brushSpine(float y, float fi, float lane, float sway, float detailAmp, float detailFreq, float twistPhase, float timeOffset) {
+  float clampedY = clamp(y, 0.0, 1.0);
+  float laneOffset = (hash11(fi * 37.1) - 0.5) * uLaneJitter;
+  float gesture = signedNoise(vec2(clampedY * 0.92 + fi * 0.17, fi * 0.41 + 1.7));
+  float gestureDetail = signedNoise(vec2(clampedY * 2.8 + fi * 0.13, fi * 0.83 + 6.1));
+  float gestureAmp = mix(0.018, 0.085, hash11(fi * 61.3)) * (0.4 + uSwayAmplitude * 3.4);
+  float arc = sway * 1.35 * sin(clampedY * (uSwayFrequency * 0.58 + 0.9) + fi * 1.9 + timeOffset * 0.35);
+  float detailWave = detailAmp * 1.8 * sin(clampedY * (detailFreq * 0.55 + 2.4) + fi * 4.1 + timeOffset * mix(0.12, 0.28, hash11(fi * 29.3)));
+  float inkDrag = gesture * gestureAmp + gestureDetail * detailAmp * 4.4;
+  float twist = twirlOffset(clampedY, twistPhase);
+  float flow = (clampedY - 0.5) * uFlowTilt;
+  return lane + laneOffset + arc + detailWave + inkDrag + twist + flow;
 }
 
 void main() {
@@ -153,29 +171,10 @@ void main() {
     float detailAmp = uDetailSwayAmplitude * mix(0.7, 1.3, hash11(fi * 29.3));
     float detailFreq = uDetailSwayFrequency * mix(0.7, 1.3, hash11(fi * 31.7));
     float twistPhase = fi * 0.7 + uTime * uTwirlSpeed;
-    float staticTwist = twirlOffset(uv.y, twistPhase);
-    float headTwist = twirlOffset(headY, twistPhase);
-    float staticFlow = (uv.y - 0.5) * uFlowTilt;
-    float headFlow = (headY - 0.5) * uFlowTilt;
-
-    float staticSpine =
-      lane +
-      (hash11(fi * 37.1) - 0.5) * uLaneJitter +
-      sway * sin(uv.y * uSwayFrequency + fi * 1.9) +
-      detailAmp * sin(uv.y * detailFreq + fi * 4.1 + hash11(fi * 29.3) * TAU) +
-      staticTwist +
-      staticFlow;
-
-    float headSpine =
-      lane +
-      (hash11(fi * 37.1) - 0.5) * uLaneJitter +
-      sway * sin(headY * uSwayFrequency + fi * 1.9 + uTime * uSwayTimeSpeed) +
-      detailAmp * sin(headY * detailFreq + fi * 4.1 + uTime * mix(0.1, 0.24, hash11(fi * 29.3))) +
-      headTwist +
-      headFlow;
+    float staticSpine = brushSpine(uv.y, fi, lane, sway, detailAmp, detailFreq, twistPhase, 0.0);
+    float headSpine = brushSpine(headY, fi, lane, sway, detailAmp, detailFreq, twistPhase, uTime * uSwayTimeSpeed);
 
     float dx = abs(uv.x - staticSpine);
-    float headDx = abs(uv.x - headSpine);
     float trailWidth = radius * mix(uTrailWidthMin, uTrailWidthMax, hash11(fi * 31.7));
     float driedCore = smoothstep(trailWidth * 2.8, trailWidth * 0.55, dx);
     float driedMask =
@@ -183,20 +182,30 @@ void main() {
       smoothstep(-0.05, 0.05, uv.y) *
       (1.0 - smoothstep(0.96, 1.12, uv.y)) *
       mix(0.5, 1.0, fbm(vec2(fi * 0.71, uv.y * 6.0 + dx * 14.0)));
-    float trailCore = smoothstep(trailWidth * 1.9, trailWidth * 0.48, headDx);
+    float alongTrail = clamp((headY - uv.y) / max(trailLength, EPSILON), 0.0, 1.0);
+    float tipBlend = smoothstep(0.02, 0.18, alongTrail);
+    float trailSpine = mix(headSpine, staticSpine, tipBlend);
+    float trailDx = abs(uv.x - trailSpine);
+    float taperedWidth = trailWidth * mix(0.22, 1.0, smoothstep(-0.02, 0.18, alongTrail));
+    float trailCore = smoothstep(taperedWidth * 2.1, taperedWidth * 0.52, trailDx);
     float trailMask =
       trailCore *
-      smoothstep(headY - trailLength - 0.05, headY - trailLength + 0.02, uv.y) *
-      (1.0 - smoothstep(headY - radius * 0.4, headY + radius * 0.35, uv.y)) *
+      smoothstep(-0.02, 0.06, alongTrail) *
+      (1.0 - smoothstep(1.0, 1.08, alongTrail)) *
       dripActive;
 
-    vec2 headOffset = vec2((uv.x - headSpine) / (radius * 0.9), (uv.y - headY) / (radius * 1.2));
-    float headMask = 1.0 - smoothstep(0.7, 1.25, length(headOffset));
-
     float bleed =
-      exp(-pow(dx / (radius * 2.8), 2.0)) *
+      exp(-pow(trailDx / (radius * 3.6), 2.0)) *
       smoothstep(-0.05, headY + radius * 0.8, uv.y) *
-      (0.35 + 0.65 * fbm(vec2(fi * 0.7, uv.y * 7.0))) *
+      (0.45 + 0.55 * fbm(vec2(fi * 0.7, uv.y * 7.0 + trailDx * 9.0))) *
+      uBleedStrength;
+
+    float soakWidth = trailWidth * mix(3.2, 5.4, 0.5 + 0.5 * grain);
+    float soakMask =
+      exp(-pow(trailDx / max(soakWidth, EPSILON), 2.0)) *
+      smoothstep(headY - trailLength - 0.08, headY + radius * 0.2, uv.y) *
+      (0.35 + 0.65 * grain + 0.18 * pulp) *
+      (0.35 + 0.65 * dripActive) *
       uBleedStrength;
 
     float satellites = 0.0;
@@ -213,8 +222,8 @@ void main() {
       satellites += (1.0 - smoothstep(0.8, 1.4, length(satOffset))) * dripActive * uSatelliteStrength;
     }
 
-    float dryMask = clamp(driedMask * 0.95 + bleed * 0.16, 0.0, 1.0);
-    float wetMask = clamp(headMask + trailMask * 0.95 + bleed * 0.24 + satellites * 0.35, 0.0, 1.0);
+    float dryMask = clamp(driedMask * 0.92 + bleed * 0.18 + soakMask * 0.22, 0.0, 1.0);
+    float wetMask = clamp(trailMask * 0.98 + bleed * 0.34 + soakMask * 0.58 + satellites * 0.18, 0.0, 1.0);
     wetMask *= dripActive;
 
     float hue = fract(hash11(fi * 13.7) * 0.9 + 0.08 * sin(fi * 1.7) + uHueShift);
@@ -223,13 +232,16 @@ void main() {
     vec3 pigment = hsv2rgb(vec3(hue, saturation, value));
     pigment = mix(pigment, vec3(0.98, 0.96, 0.93), clamp(uPastelMix, 0.0, 1.0));
 
-    float pooling = clamp(headMask * 0.85 + trailMask * 0.35 + dryMask * 0.2, 0.0, 1.0);
-    float absorb = (0.55 + 0.45 * grain) * uAbsorbStrength;
-    vec3 dryTint = mix(pigment, paper, 0.48 + 0.18 * blotches);
-    vec3 edgeTint = mix(pigment, paper, 0.28 + 0.24 * blotches);
-    vec3 dryWash = mix(dryTint, pigment * 0.72, clamp(dryMask * 0.65 + bleed * 0.1, 0.0, 1.0));
+    float pooling = clamp(trailMask * 0.5 + soakMask * 0.55 + dryMask * 0.24, 0.0, 1.0);
+    float absorb = (0.72 + 0.6 * grain + 0.18 * pulp) * uAbsorbStrength;
+    vec3 dryTint = mix(pigment, paper, 0.54 + 0.16 * blotches + 0.06 * grain);
+    vec3 edgeTint = mix(pigment, paper, 0.3 + 0.22 * blotches + 0.1 * grain);
+    vec3 seepTint = mix(pigment, paper, 0.62 + 0.16 * grain);
+    vec3 dryWash = mix(dryTint, pigment * 0.72, clamp(dryMask * 0.62 + bleed * 0.14, 0.0, 1.0));
+    vec3 soakWash = mix(seepTint, pigment * 0.8, clamp(soakMask * 0.72 + bleed * 0.18, 0.0, 1.0));
     vec3 wash = mix(edgeTint, pigment * 0.9, pooling);
     color = mix(color, dryWash, dryMask * absorb * 0.5 * uDryMix);
+    color = mix(color, soakWash, clamp(soakMask, 0.0, 1.0) * absorb * 0.32 * uWetMix);
     color = mix(color, wash, wetMask * absorb * 0.78 * uWetMix);
   }
 
