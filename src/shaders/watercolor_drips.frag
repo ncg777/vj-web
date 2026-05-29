@@ -83,7 +83,7 @@ void main() {
     float lane = mix(0.08, 0.92, hash11(fi * 7.13));
     float cycle = mix(16.0, 30.0, hash11(fi * 2.71));
     float phase = fract(uTime / cycle + hash11(fi * 11.9));
-    float active = smoothstep(0.01, 0.08, phase) * (1.0 - smoothstep(0.8, 0.98, phase));
+    float dripActive = smoothstep(0.01, 0.08, phase) * (1.0 - smoothstep(0.8, 0.98, phase));
     float travel = pow(phase, mix(1.15, 1.55, hash11(fi * 5.37)));
     float headY = mix(-0.24, 1.16, travel);
     float radius = mix(0.018, 0.04, hash11(fi * 17.2));
@@ -116,11 +116,11 @@ void main() {
       float satX = spine + (hash11(fi * 43.7 + fj) - 0.5) * trailWidth * 4.0;
       float satR = radius * mix(0.18, 0.32, hash11(fi * 47.1 + fj));
       vec2 satOffset = vec2((uv.x - satX) / satR, (uv.y - satY) / (satR * 1.2));
-      satellites += (1.0 - smoothstep(0.8, 1.4, length(satOffset))) * active;
+      satellites += (1.0 - smoothstep(0.8, 1.4, length(satOffset))) * dripActive;
     }
 
     float mask = clamp(headMask + trailMask * 0.95 + bleed * 0.28 + satellites * 0.35, 0.0, 1.0);
-    mask *= active;
+    mask *= dripActive;
 
     float hue = fract(hash11(fi * 13.7) * 0.9 + 0.08 * sin(fi * 1.7));
     float saturation = mix(0.45, 0.78, hash11(fi * 53.9));
