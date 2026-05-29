@@ -7,8 +7,57 @@ out vec4 outColor;
 uniform vec2 uResolution;
 uniform float uTime;
 
+uniform int uDripCount;
+uniform float uCycleMin;
+uniform float uCycleMax;
+uniform float uTravelGammaMin;
+uniform float uTravelGammaMax;
+uniform float uRadiusMin;
+uniform float uRadiusMax;
+uniform float uTrailLengthMin;
+uniform float uTrailLengthMax;
+uniform float uTrailWidthMin;
+uniform float uTrailWidthMax;
+uniform float uLaneJitter;
+uniform float uSwayAmplitude;
+uniform float uSwayFrequency;
+uniform float uDetailSwayAmplitude;
+uniform float uDetailSwayFrequency;
+uniform float uSwayTimeSpeed;
+uniform float uTwistAmount;
+uniform float uTwistFrequency;
+uniform float uTwirlSpeed;
+uniform float uTwirlFalloff;
+uniform float uFlowTilt;
+uniform float uBleedStrength;
+uniform float uSatelliteStrength;
+uniform int uSatelliteCount;
+uniform float uSatelliteSpread;
+uniform float uSatelliteSizeMin;
+uniform float uSatelliteSizeMax;
+uniform float uDryMix;
+uniform float uWetMix;
+uniform float uAbsorbStrength;
+uniform float uHueShift;
+uniform float uSaturationBoost;
+uniform float uValueBoost;
+uniform float uPastelMix;
+uniform float uPaperGrainScale;
+uniform float uPaperGrainAmount;
+uniform float uPaperPulpAmount;
+uniform float uPaperFiberAmount;
+uniform float uPaperFleckAmount;
+uniform float uPaperBlotchAmount;
+uniform float uVignetteStrength;
+
 const float TAU = 6.28318530718;
-const int DRIP_COUNT = 18;
+const float EPSILON = 0.001;
+const float MIN_FALLOFF = 0.01;
+const float SATELLITE_TRAIL_BASE = 0.3;
+const float SATELLITE_TRAIL_STEP = 0.35;
+const float SATELLITE_LAG_SPAN = 0.08;
+const int MAX_DRIP_COUNT = 36;
+const int MAX_SATELLITES = 4;
 
 float hash11(float p) {
   p = fract(p * 0.1031);
@@ -58,12 +107,14 @@ vec3 hsv2rgb(vec3 c) {
   return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
 }
 
+float twirlOffset(float y, float phase) {
+  return sin(y * uTwistFrequency * TAU + phase) * uTwistAmount * pow(clamp(y, 0.0, 1.0), max(uTwirlFalloff, MIN_FALLOFF));
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / uResolution.xy;
-  vec2 aspectUv = uv;
-  aspectUv.x *= uResolution.x / uResolution.y;
 
-  float grain = fbm(uv * vec2(18.0, 24.0));
+  float grain = fbm(uv * vec2(18.0, 24.0) * max(uPaperGrainScale, 0.05));
   float pulp = fbm(uv * vec2(7.0, 10.0) + vec2(3.1, 8.7));
   float fibers = fbm(vec2(uv.x * 2.5 + pulp * 0.4, uv.y * 55.0));
   float flecks = fbm(uv * vec2(90.0, 115.0) + vec2(12.0, 4.0));
@@ -71,38 +122,61 @@ void main() {
   float vignette = smoothstep(1.15, 0.15, length((uv - 0.5) * vec2(1.1, 0.95)));
 
   vec3 paper = vec3(0.955, 0.925, 0.875);
-  paper += 0.08 * (grain - 0.5);
-  paper += vec3(0.035, 0.032, 0.026) * smoothstep(0.52, 0.9, fibers);
-  paper += 0.03 * (pulp - 0.5);
-  paper -= 0.018 * smoothstep(0.7, 0.92, flecks);
-  paper -= 0.06 * smoothstep(0.45, 0.95, blotches);
-  paper *= 0.93 + 0.07 * vignette;
+  paper += uPaperGrainAmount * (grain - 0.5);
+  paper += vec3(0.035, 0.032, 0.026) * smoothstep(0.52, 0.9, fibers) * uPaperFiberAmount;
+  paper += uPaperPulpAmount * (pulp - 0.5);
+  paper -= uPaperFleckAmount * smoothstep(0.7, 0.92, flecks);
+  paper -= uPaperBlotchAmount * smoothstep(0.45, 0.95, blotches);
+  paper *= 1.0 - uVignetteStrength + uVignetteStrength * vignette;
 
   vec3 color = paper;
 
-  for (int i = 0; i < DRIP_COUNT; i++) {
+  int dripCount = clamp(uDripCount, 1, MAX_DRIP_COUNT);
+  int satelliteCount = clamp(uSatelliteCount, 0, MAX_SATELLITES);
+
+  for (int i = 0; i < MAX_DRIP_COUNT; i++) {
+    if (i >= dripCount) {
+      continue;
+    }
+
     float fi = float(i) + 1.0;
     float lane = mix(0.08, 0.92, hash11(fi * 7.13));
-    float cycle = mix(16.0, 30.0, hash11(fi * 2.71));
-    float phase = fract(uTime / cycle + hash11(fi * 11.9));
+    float cycle = mix(uCycleMin, uCycleMax, hash11(fi * 2.71));
+    float phase = fract(uTime / max(cycle, EPSILON) + hash11(fi * 11.9));
     float dripActive = smoothstep(0.01, 0.08, phase) * (1.0 - smoothstep(0.8, 0.98, phase));
-    float travel = pow(phase, mix(1.15, 1.55, hash11(fi * 5.37)));
+    float travel = pow(phase, mix(uTravelGammaMin, uTravelGammaMax, hash11(fi * 5.37)));
     float headY = mix(-0.24, 1.16, travel);
-    float radius = mix(0.018, 0.04, hash11(fi * 17.2));
-    float trailLength = mix(0.14, 0.42, hash11(fi * 19.4)) * smoothstep(0.03, 0.35, phase);
-    float sway = (hash11(fi * 23.1) - 0.5) * 0.05;
+    float radius = mix(uRadiusMin, uRadiusMax, hash11(fi * 17.2));
+    float trailLength = mix(uTrailLengthMin, uTrailLengthMax, hash11(fi * 19.4)) * smoothstep(0.03, 0.35, phase);
+
+    float sway = (hash11(fi * 23.1) - 0.5) * uSwayAmplitude;
+    float detailAmp = uDetailSwayAmplitude * mix(0.7, 1.3, hash11(fi * 29.3));
+    float detailFreq = uDetailSwayFrequency * mix(0.7, 1.3, hash11(fi * 31.7));
+    float twistPhase = fi * 0.7 + uTime * uTwirlSpeed;
+    float staticTwist = twirlOffset(uv.y, twistPhase);
+    float headTwist = twirlOffset(headY, twistPhase);
+    float staticFlow = (uv.y - 0.5) * uFlowTilt;
+    float headFlow = (headY - 0.5) * uFlowTilt;
+
     float staticSpine =
       lane +
-      sway * sin(uv.y * 3.4 + fi * 1.9) +
-      0.012 * sin(uv.y * 10.0 + fi * 4.1 + hash11(fi * 29.3) * TAU);
+      (hash11(fi * 37.1) - 0.5) * uLaneJitter +
+      sway * sin(uv.y * uSwayFrequency + fi * 1.9) +
+      detailAmp * sin(uv.y * detailFreq + fi * 4.1 + hash11(fi * 29.3) * TAU) +
+      staticTwist +
+      staticFlow;
+
     float headSpine =
       lane +
-      sway * sin(headY * 3.4 + fi * 1.9) +
-      0.012 * sin(headY * 10.0 + fi * 4.1 + uTime * mix(0.1, 0.24, hash11(fi * 29.3)));
+      (hash11(fi * 37.1) - 0.5) * uLaneJitter +
+      sway * sin(headY * uSwayFrequency + fi * 1.9 + uTime * uSwayTimeSpeed) +
+      detailAmp * sin(headY * detailFreq + fi * 4.1 + uTime * mix(0.1, 0.24, hash11(fi * 29.3))) +
+      headTwist +
+      headFlow;
 
     float dx = abs(uv.x - staticSpine);
     float headDx = abs(uv.x - headSpine);
-    float trailWidth = radius * mix(0.35, 0.65, hash11(fi * 31.7));
+    float trailWidth = radius * mix(uTrailWidthMin, uTrailWidthMax, hash11(fi * 31.7));
     float driedCore = smoothstep(trailWidth * 2.8, trailWidth * 0.55, dx);
     float driedMask =
       driedCore *
@@ -122,37 +196,41 @@ void main() {
     float bleed =
       exp(-pow(dx / (radius * 2.8), 2.0)) *
       smoothstep(-0.05, headY + radius * 0.8, uv.y) *
-      (0.35 + 0.65 * fbm(vec2(fi * 0.7, uv.y * 7.0)));
+      (0.35 + 0.65 * fbm(vec2(fi * 0.7, uv.y * 7.0))) *
+      uBleedStrength;
 
     float satellites = 0.0;
-    for (int j = 0; j < 2; j++) {
+    for (int j = 0; j < MAX_SATELLITES; j++) {
+      if (j >= satelliteCount) {
+        continue;
+      }
       float fj = float(j) + 1.0;
       float lag = fract(phase + 0.23 * fj + hash11(fi * 41.3 + fj));
-      float satY = headY - trailLength * (0.3 + 0.45 * fj) - lag * 0.08;
-      float satX = headSpine + (hash11(fi * 43.7 + fj) - 0.5) * trailWidth * 4.0;
-      float satR = radius * mix(0.18, 0.32, hash11(fi * 47.1 + fj));
+      float satY = headY - trailLength * (SATELLITE_TRAIL_BASE + SATELLITE_TRAIL_STEP * fj) - lag * SATELLITE_LAG_SPAN;
+      float satX = headSpine + (hash11(fi * 43.7 + fj) - 0.5) * trailWidth * uSatelliteSpread;
+      float satR = radius * mix(uSatelliteSizeMin, uSatelliteSizeMax, hash11(fi * 47.1 + fj));
       vec2 satOffset = vec2((uv.x - satX) / satR, (uv.y - satY) / (satR * 1.2));
-      satellites += (1.0 - smoothstep(0.8, 1.4, length(satOffset))) * dripActive;
+      satellites += (1.0 - smoothstep(0.8, 1.4, length(satOffset))) * dripActive * uSatelliteStrength;
     }
 
     float dryMask = clamp(driedMask * 0.95 + bleed * 0.16, 0.0, 1.0);
     float wetMask = clamp(headMask + trailMask * 0.95 + bleed * 0.24 + satellites * 0.35, 0.0, 1.0);
     wetMask *= dripActive;
 
-    float hue = fract(hash11(fi * 13.7) * 0.9 + 0.08 * sin(fi * 1.7));
-    float saturation = mix(0.45, 0.78, hash11(fi * 53.9));
-    float value = mix(0.56, 0.84, hash11(fi * 59.2));
+    float hue = fract(hash11(fi * 13.7) * 0.9 + 0.08 * sin(fi * 1.7) + uHueShift);
+    float saturation = clamp(mix(0.45, 0.78, hash11(fi * 53.9)) + uSaturationBoost, 0.0, 1.0);
+    float value = clamp(mix(0.56, 0.84, hash11(fi * 59.2)) + uValueBoost, 0.0, 1.0);
     vec3 pigment = hsv2rgb(vec3(hue, saturation, value));
-    pigment = mix(pigment, vec3(0.98, 0.96, 0.93), 0.18);
+    pigment = mix(pigment, vec3(0.98, 0.96, 0.93), clamp(uPastelMix, 0.0, 1.0));
 
     float pooling = clamp(headMask * 0.85 + trailMask * 0.35 + dryMask * 0.2, 0.0, 1.0);
-    float absorb = 0.55 + 0.45 * grain;
+    float absorb = (0.55 + 0.45 * grain) * uAbsorbStrength;
     vec3 dryTint = mix(pigment, paper, 0.48 + 0.18 * blotches);
     vec3 edgeTint = mix(pigment, paper, 0.28 + 0.24 * blotches);
     vec3 dryWash = mix(dryTint, pigment * 0.72, clamp(dryMask * 0.65 + bleed * 0.1, 0.0, 1.0));
     vec3 wash = mix(edgeTint, pigment * 0.9, pooling);
-    color = mix(color, dryWash, dryMask * absorb * 0.5);
-    color = mix(color, wash, wetMask * absorb * 0.78);
+    color = mix(color, dryWash, dryMask * absorb * 0.5 * uDryMix);
+    color = mix(color, wash, wetMask * absorb * 0.78 * uWetMix);
   }
 
   color *= 0.98 + 0.02 * vignette;
