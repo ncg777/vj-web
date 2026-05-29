@@ -20,6 +20,7 @@ import fractalFoldFrag from "./shaders/fractal_fold_raymarch.frag?raw";
 import hadamardDiskFrag from "./shaders/hadamard_disk.frag?raw";
 import fractalReverieFrag from "./shaders/fractal_reverie.frag?raw";
 import polarRoseFrag from "./shaders/polar_rose.frag?raw";
+import watercolorDripsFrag from "./shaders/watercolor_drips.frag?raw";
 
 export type KeyBinding = {
   inc: string;
@@ -793,6 +794,16 @@ export const animations: AnimationConfig[] = [
         component: 2,
       },
     ],
+  },
+  {
+    id: "watercolor-drips",
+    name: "Watercolor Drips",
+    description: "Textured canvas washed with softly colored paint drops that drift downward.",
+    fragment: watercolorDripsFrag,
+    resolutionUniform: "uResolution",
+    timeUniform: "uTime",
+    timeMode: "seconds",
+    params: [],
   },
   {
     id: "tileable-water-plus",
