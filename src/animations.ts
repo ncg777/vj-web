@@ -798,7 +798,7 @@ export const animations: AnimationConfig[] = [
   {
     id: "watercolor-drips",
     name: "Watercolor Drips",
-    description: "Textured canvas washed with softly colored paint drops that drift downward.",
+    description: "Textured paper washed with softly colored paint drops that drift downward and leave permanent trails.",
     fragment: watercolorDripsFrag,
     resolutionUniform: "uResolution",
     timeUniform: "uTime",
