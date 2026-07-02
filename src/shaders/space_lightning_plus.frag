@@ -157,8 +157,17 @@ void main() {
   // finite-difference curl advection cost 16 fbm evaluations per layer;
   // an analytic swirl warp gives the same fluid drift for almost free.
   // ------------------------------------------------------------------
+  // Large-scale structure fields, computed ONCE (not per layer): a slow
+  // "zone" field that splits the nebula into distinct chromatic regions,
+  // and a "void" field that carves dark pockets through the gas so the
+  // cloud mass never reads as one homogeneous wash.
+  float tcloud = t * uCloudSpeed;
+  float zone = fbm4(uv * 0.55 + seed * 2.1 + tcloud * vec2(0.021, -0.013));
+  float voids = fbm4(uv * 0.8 - seed * 4.3 + tcloud * vec2(-0.017, 0.024));
+  float voidMask = smoothstep(0.28, 0.62, voids);
+
   vec3 nebula = vec3(0.0);
-  const int LAYERS = 4;
+  const int LAYERS = 3;
   for (int layer = 0; layer < LAYERS; layer++) {
     float fl = float(layer);
     float depth = 1.0 + fl * uParallax;
@@ -167,7 +176,7 @@ void main() {
     // Analytic swirl: a rotating sinusoidal displacement field that is
     // divergence-free by construction, so the gas swirls instead of
     // scrolling, without any extra noise fetches.
-    float tc = t * uCloudSpeed;
+    float tc = tcloud;
     float sw = tc * (0.16 + 0.09 * fl);
     vec2 flow = uCurlStrength * 0.28 * vec2(
       sin(lp.y * 1.3 + sw) + 0.5 * sin(lp.y * 2.9 - sw * 1.7),
@@ -181,33 +190,32 @@ void main() {
     );
     float f = fbm4(warped + (1.3 + uWarp) * q);
 
-    // Fine turbulent detail, ridged wisps, and broad voids break the gas
-    // into more chaotic filaments and chromatic pockets.
+    // Fine turbulent detail plus a ridged transform of it: the ridges
+    // give wispy filaments and the voids carve dark pockets, so the gas
+    // breaks into structured shapes with no extra noise fetches.
     float fine = fbm4(warped * 3.2 - tc * 0.28);
     float ridged = 1.0 - abs(2.0 * fine - 1.0);
-    float veins = fbm4(warped * 1.9 + q * 2.1 + vec2(-tc * 0.18, tc * 0.14));
-    float wisps = fbm4(warped * 4.7 + q.yx * 1.6 + vec2(3.7, -8.1) - tc * 0.33);
-    float pockets = fbm4(warped * 0.85 - q * 1.3 + vec2(6.3, -2.4));
-    float blended = mix(f, fine, clamp(uTurbulence, 0.0, 1.0) * 0.34);
-    blended = mix(blended, ridged, 0.18 + 0.27 * clamp(uTurbulence, 0.0, 1.0));
-    blended += (veins - 0.5) * 0.18 + (wisps - 0.5) * 0.12 - (pockets - 0.5) * 0.1;
+    ridged *= ridged;
+    float turb = clamp(uTurbulence, 0.0, 1.0);
+    float blended = mix(f, fine, turb * 0.35);
+    blended = mix(blended, ridged * 0.5 + blended * 0.5, turb * 0.6);
 
-    float density = smoothstep(uCloudDensity - 0.24, uCloudDensity + 0.26, blended);
-    density *= 0.72 + 0.55 * smoothstep(0.18, 0.92, ridged);
-    density *= 0.82 + 0.38 * smoothstep(0.35, 0.85, wisps);
-    density = pow(clamp(density, 0.0, 1.0), mix(1.0, 3.4, clamp(uCloudContrast, 0.0, 1.0)));
+    float density = smoothstep(uCloudDensity - 0.22, uCloudDensity + 0.25, blended);
+    // Voids eat into the gas; ridges push filaments back up through them.
+    density *= mix(0.25, 1.0, voidMask) + ridged * 0.35;
+    density = pow(clamp(density, 0.0, 1.0), mix(1.0, 3.0, clamp(uCloudContrast, 0.0, 1.0)));
 
-    float chroma = 0.12 + 0.88 * q.y;
-    float hueScatter = fl * 0.37 + (veins - pockets) * 0.28 + ridged * 0.18;
-    vec3 gasA = palette(blended * 1.55 + radius * 0.19 + hueScatter);
-    vec3 gasB = palette(length(q) * 1.18 + 0.32 + fl * 0.21 - wisps * 0.14);
-    vec3 gasC = palette(f * 0.92 + 0.58 - fl * 0.16 + chroma * 0.34 + veins * 0.21);
-    vec3 gasD = palette(ridged * 0.75 + pockets * 0.42 + hueScatter * 0.7 + 0.41);
-    vec3 layerCol = mix(gasA, gasB, clamp(length(q) * 1.15 + chroma * 0.25, 0.0, 1.0));
-    layerCol = mix(layerCol, gasC, clamp(f * f * 1.35 + wisps * 0.22 - 0.12, 0.0, 1.0));
-    layerCol = mix(layerCol, gasD, clamp(ridged * 0.75 + veins * 0.35 - pockets * 0.18, 0.0, 1.0));
-    layerCol += (gasC - gasA) * (veins - 0.5) * 0.22;
-    layerCol *= 0.65 + 0.6 * density;
+    // Distinct chromatic regions: the slow zone field picks which of
+    // three well-separated palette bands dominates locally, instead of
+    // averaging every sample into a uniform wash.
+    float chroma = 0.25 + 0.75 * q.y;
+    vec3 gasA = palette(blended * 1.3 + radius * 0.16 + fl * 0.29);
+    vec3 gasB = palette(length(q) * 1.05 + 0.34 + fl * 0.17 + zone * 0.5);
+    vec3 gasC = palette(f * 0.8 + 0.66 - fl * 0.12 + chroma * 0.3 - zone * 0.45);
+    float zoneSel = smoothstep(0.32, 0.58, zone + (q.x - 0.5) * 0.3);
+    vec3 layerCol = mix(gasA, gasB, zoneSel);
+    layerCol = mix(layerCol, gasC, smoothstep(0.45, 0.72, ridged * 0.6 + chroma * 0.5 - zone * 0.3));
+    layerCol *= 0.8 + 0.45 * density;
 
     nebula += max(layerCol, 0.0) * density / depth;
   }
@@ -240,6 +248,7 @@ void main() {
   int branchCount = int(clamp(uBranchCount, 0.0, 6.0));
 
   for (int i = 0; i < MAX_BOLTS; i++) {
+    if (i >= boltCount) break;
     float fi = float(i);
     float hs = fi * 12.9 + seed * 91.7;
 
@@ -251,42 +260,57 @@ void main() {
     float strikeIndex = floor(cycle);
     float strikePhase = fract(cycle);
     float strikeSeed = fract(hash1(hs + strikeIndex * (1.0 + uStrikeChaos * 3.0))) * 61.7 + 3.0;
-    float slotChance = clamp(
-      (float(boltCount) + (hash1(strikeSeed + 11.7) - 0.5) * (2.0 + uStrikeChaos * 2.5)) / float(MAX_BOLTS),
-      0.08,
-      0.98
-    );
-    if (hash1(hs * 3.7 + strikeIndex * 5.1 + seed * 2.3) > slotChance) {
+
+    // Varying strike count: the first slots always participate so the
+    // frame is never empty, while the remaining slots gate on and off
+    // per strike cycle - activity naturally clusters and thins out.
+    float slotN = fi / max(float(boltCount) - 1.0, 1.0);
+    float gateBias = 0.85 - slotN * (0.55 + 0.35 * clamp(uStrikeChaos, 0.0, 2.0));
+    if (fi > 1.5 && hash1(hs * 3.7 + strikeIndex * 5.1 + seed * 2.3) > gateBias) {
       continue;
     }
 
-    // Distributed strikes stay dimmer between flashes so the frame can
-    // breathe instead of reading as a permanently lit starburst.
-    float flashBaseline = STRIKE_BASELINE * 0.3;
-    float flash = flashBaseline + 0.92 * exp(-strikePhase * (3.6 + uStrikeChaos * 6.0));
+    float flash = STRIKE_BASELINE * 0.5 + 0.9 * exp(-strikePhase * (3.6 + uStrikeChaos * 6.0));
     flash *= smoothstep(0.0, 0.03, strikePhase);
     // Rapid intra-strike flicker, like a channel re-striking.
     flash *= 0.75 + 0.25 * sin((strikePhase * 40.0 + hash1(hs + 2.0) * TAU) * (1.0 + uStrikeChaos));
 
-    float energy = flash * uBoltIntensity * (0.75 + 0.55 * hash1(strikeSeed + 12.3));
+    float energy = flash * uBoltIntensity * (0.75 + 0.5 * hash1(strikeSeed + 12.3));
 
-    float baseAng = hash1(strikeSeed + 3.1) * TAU + (hash1(strikeSeed + 4.8) - 0.5) * uStrikeChaos * 1.3;
-    float reach = uBoltReach * (0.35 + 0.9 * hash1(strikeSeed + 4.2));
-    float originAng = hash1(strikeSeed + 5.4) * TAU;
-    float originRadius = mix(coreR * 0.3, uBoltReach * (0.55 + 1.2 * hash1(strikeSeed + 6.8)), hash1(strikeSeed + 6.1));
-    vec2 strikeOrigin = vec2(cos(originAng), sin(originAng)) * originRadius;
-    strikeOrigin += (vec2(hash1(strikeSeed + 7.1), hash1(strikeSeed + 8.9)) - 0.5) * (0.45 + 0.75 * uStrikeChaos);
-    strikeOrigin += 0.12 * vec2(
-      sin(strikePhase * 19.0 + hs),
-      cos(strikePhase * 17.0 - hs)
-    ) * (0.2 + 0.8 * hash1(strikeSeed + 10.7));
+    float baseAng = hash1(strikeSeed + 3.1) * TAU;
+    float reach = uBoltReach * (0.45 + 0.75 * hash1(strikeSeed + 4.2));
 
-    // Rotate into the bolt frame: channel along +x from a randomized
-    // strike origin so flashes can erupt anywhere in the nebula.
+    // Strike origins: the first two slots stay anchored to the plasma
+    // core; the rest scatter through the visible frame. Origins are
+    // drawn from a bounded disc (never past the frame edge) and the
+    // channel is re-aimed back toward the frame so the discharge stays
+    // on screen instead of erupting into empty space.
+    vec2 strikeOrigin = vec2(0.0);
+    if (fi > 1.5) {
+      float originAng = hash1(strikeSeed + 5.4) * TAU;
+      float originRadius = (0.15 + 0.75 * hash1(strikeSeed + 6.1)) * min(uZoom, 1.4);
+      strikeOrigin = vec2(cos(originAng) * 1.35, sin(originAng)) * originRadius;
+      // Aim mostly back across the frame so the bolt reach stays visible.
+      baseAng = originAng + 3.14159 + (hash1(strikeSeed + 4.8) - 0.5) * (1.6 + uStrikeChaos);
+      // Discrete re-strike jumps: the channel snaps to nearby positions
+      // a few times within a strike (like a re-striking leader) rather
+      // than gliding smoothly, which reads as electric instead of drifty.
+      float restep = floor(strikePhase * (2.0 + 3.0 * clamp(uStrikeChaos, 0.0, 2.0)));
+      strikeOrigin += (vec2(
+        hash1(strikeSeed + restep * 7.3 + 21.4),
+        hash1(strikeSeed + restep * 9.1 + 34.8)
+      ) - 0.5) * 0.1;
+    }
+
+    // Rotate into the bolt frame: channel along +x from the strike
+    // origin (the core for the anchored slots).
     float ca = cos(baseAng);
     float sa = sin(baseAng);
     vec2 local = uv - strikeOrigin;
     vec2 p = vec2(ca * local.x + sa * local.y, -sa * local.x + ca * local.y);
+    if (fi <= 1.5) {
+      p.x -= coreR * 0.35;
+    }
 
     float along = clamp(p.x / reach, 0.0, 1.0);
 
@@ -316,7 +340,7 @@ void main() {
     ray *= ray;
     float gw = w * (14.0 + uBloomRadius * 30.0);
     float glow = gw / (d + gw);
-    float hueOffset = hash1(strikeSeed + 13.7) * 0.45;
+    float hueOffset = hash1(strikeSeed + 13.7) * 0.35;
 
     boltCore += ray * energy;
     boltGlow += glow * glow * energy * uBloomIntensity * 0.3;
