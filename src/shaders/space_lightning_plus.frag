@@ -90,13 +90,14 @@ float noise(vec2 p) {
 const mat2 ROT = mat2(0.8, 0.6, -0.6, 0.8);
 
 // Fractional Brownian motion; the loop is capped at a fixed maximum of
-// 7 octaves for performance, while the actual octave count used is
-// controlled by the caller via the `octaves` argument.
+// 5 octaves for both performance and stability while the actual octave
+// count used is still controlled by the caller via the `octaves` argument.
 float fbm(vec2 p, int octaves) {
   float v = 0.0;
   float a = 0.5;
-  for (int i = 0; i < 7; i++) {
-    if (i >= octaves) break;
+  int limit = min(octaves, 5);
+  for (int i = 0; i < 5; i++) {
+    if (i >= limit) break;
     v += a * noise(p);
     p = ROT * p * 2.02 + vec2(11.7, 5.1);
     a *= 0.5;
@@ -108,7 +109,7 @@ float fbm(vec2 p, int octaves) {
 // used to advect the gas so it swirls and diffuses like a real fluid
 // instead of just scrolling.
 vec2 curlNoise(vec2 p) {
-  const float e = 0.09;
+  const float e = 0.085;
   float n1 = fbm(p + vec2(0.0, e), 4);
   float n2 = fbm(p - vec2(0.0, e), 4);
   float n3 = fbm(p + vec2(e, 0.0), 4);
@@ -118,11 +119,14 @@ vec2 curlNoise(vec2 p) {
   return vec2(dy, -dx);
 }
 
-// Inigo Quilez style cosine palette, continuously rotated by uHueSpeed
-// so the whole spectrum drifts through the nebula and bolts over time.
+// A richer palette that keeps the gas vivid and chromatic while still
+// honoring the user's color controls and the time-driven hue drift.
 vec3 palette(float t) {
-  float hue = t + uPaletteShift + uTime * uTimeScale * uHueSpeed;
-  return uColorPrimary + uColorSecondary * cos(TAU * (uColorAccent * hue));
+  float hue = fract(t + uPaletteShift + uTime * uTimeScale * uHueSpeed);
+  float pulse = 0.55 + 0.45 * sin(hue * TAU * 2.0 + uTime * 0.7);
+  vec3 warm = mix(uColorPrimary, uColorSecondary, 0.35 + 0.25 * smoothstep(0.0, 1.0, hue));
+  vec3 cool = mix(uColorAccent, vec3(1.0), 0.1 + 0.2 * pulse);
+  return mix(warm, cool, smoothstep(0.3, 0.75, hue)) * (0.75 + 0.55 * pulse);
 }
 
 // Smallest signed periodic angular difference, continuous everywhere.
@@ -257,7 +261,7 @@ void main() {
     // genuinely fluid, swirling diffusion instead of a simple scroll.
     float tc = t * uCloudSpeed;
     vec2 flow = curlNoise(lp * 0.6 + tc * (0.05 + 0.03 * fl)) * uCurlStrength;
-    vec2 warped = lp + flow + tc * (0.04 / depth) * vec2(1.0, 0.4);
+    vec2 warped = lp + flow * 0.8 + tc * (0.04 / depth) * vec2(1.0, 0.4);
 
     vec2 q = vec2(
       fbm(warped + vec2(0.0, 0.0), 5),
@@ -267,20 +271,22 @@ void main() {
       fbm(warped + (1.1 + uWarp) * q + vec2(1.7, 9.2), 5),
       fbm(warped + (1.1 + uWarp) * q + vec2(8.3, 2.8), 5)
     );
-    float f = fbm(warped + (1.4 + uWarp) * r2, 6);
+    float f = fbm(warped + (1.4 + uWarp) * r2, 5);
 
-    // Fine turbulent detail layered on top for wispy filaments.
-    float fine = fbm(warped * 3.1 - t * 0.3, 4);
-    f = mix(f, fine, clamp(uTurbulence, 0.0, 1.0) * 0.4);
-
-    float density = smoothstep(uCloudDensity - 0.22, uCloudDensity + 0.22, f);
+    // Fine turbulent detail layered on top for wispy filaments and a
+    // smoother, more organic diffuse cloud field.
+    float fine = fbm(warped * 3.2 - tc * 0.28, 4);
+    float blended = mix(f, fine, clamp(uTurbulence, 0.0, 1.0) * 0.45);
+    float density = smoothstep(uCloudDensity - 0.21, uCloudDensity + 0.24, blended);
     density = pow(density, mix(1.0, 3.0, clamp(uCloudContrast, 0.0, 1.0)));
 
-    vec3 gasA = palette(f * 1.4 + radius * 0.2 + fl * 0.31);
-    vec3 gasB = palette(length(q) * 0.9 + 0.33 + fl * 0.17);
-    vec3 gasC = palette(length(r2) * 0.7 + 0.66 - fl * 0.12);
-    vec3 layerCol = mix(gasA, gasB, clamp(length(q) * 1.2 - 0.2, 0.0, 1.0));
-    layerCol = mix(layerCol, gasC, clamp(r2.x * r2.x * 1.4 - 0.15, 0.0, 1.0));
+    float chroma = 0.25 + 0.75 * fbm(warped * 1.45 + tc * 0.12, 4);
+    vec3 gasA = palette(blended * 1.35 + radius * 0.16 + fl * 0.31 + chroma * 0.2);
+    vec3 gasB = palette(length(q) * 1.05 + 0.28 + fl * 0.17 + length(flow) * 0.08);
+    vec3 gasC = palette(length(r2) * 0.8 + 0.64 - fl * 0.12 + chroma * 0.32);
+    vec3 layerCol = mix(gasA, gasB, clamp(length(q) * 1.25 + chroma * 0.28 - 0.12, 0.0, 1.0));
+    layerCol = mix(layerCol, gasC, clamp(r2.x * r2.x * 1.4 - 0.16 + length(flow) * 0.08, 0.0, 1.0));
+    layerCol *= 0.85 + 0.4 * density;
 
     nebula += max(layerCol, 0.0) * density / depth;
   }
@@ -320,10 +326,11 @@ void main() {
     float strikePhase = fract(cycle);
     float strikeSeed = hs + strikeIndex * 71.3 * (1.0 + uStrikeChaos);
 
-    // Sudden bright flash, fast exponential-feeling decay.
-    float flash = exp(-strikePhase * (5.0 + uStrikeChaos * 10.0));
-    flash *= smoothstep(0.0, 0.03, strikePhase);
-    if (flash < 0.01) continue;
+    // The strike envelope now stays alive slightly between bursts, which
+    // cuts the hard popping from the previous stepwise lifecycle.
+    float flash = 0.16 + 0.84 * exp(-strikePhase * (3.6 + uStrikeChaos * 6.0));
+    flash *= smoothstep(0.0, 0.04, strikePhase);
+    flash *= 0.7 + 0.3 * sin(cycle * 0.8 + hash1(hs + 2.0) * TAU);
 
     float baseAng = hash1(strikeSeed + 3.1) * TAU;
     float reach = uBoltReach * (0.5 + hash1(strikeSeed + 4.2));
