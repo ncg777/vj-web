@@ -38,6 +38,19 @@ uniform vec3 uAuroraColorC;
 uniform vec3 uBgColorA;
 uniform vec3 uBgColorB;
 uniform int uAuroraSteps;
+uniform float uVortexStrength;
+uniform float uVortexGridScale;
+uniform float uVortexRadius;
+uniform float uVortexWobble;
+uniform float uVortexWobbleSpeed;
+uniform float uVortexSpin;
+uniform float uVortexDesync;
+uniform float uVortexDrift;
+uniform float uVortexColorShift;
+uniform float uOilStrength;
+uniform float uOilScale;
+uniform float uOilSpeed;
+uniform float uOilContrast;
 
 const float TAU = 6.28318530718;
 
@@ -137,6 +150,55 @@ vec3 stars(vec3 p) {
   return c * c * uStarIntensity;
 }
 
+vec2 hash22(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.xx + p3.yz) * p3.zy);
+}
+
+// Loose wobbly grid of out-of-sync vortices. Warps `p` in place and
+// returns the accumulated signed swirl amount for color effects.
+float vortexField(inout vec2 p, float time) {
+  float grid = max(uVortexGridScale, 0.01);
+  vec2 gp = p * grid;
+  vec2 cell = floor(gp);
+  float swirlSum = 0.0;
+  vec2 warped = p;
+  for (int oy = -1; oy <= 1; oy++) {
+    for (int ox = -1; ox <= 1; ox++) {
+      vec2 id = cell + vec2(float(ox), float(oy));
+      vec2 rnd = hash22(id + 17.31);
+      // Each vortex wobbles around its jittered lattice point, out of sync.
+      float phase = rnd.x * TAU * uVortexDesync;
+      vec2 wobble = vec2(
+        sin(time * uVortexWobbleSpeed * (0.6 + rnd.x * 0.8) + phase),
+        cos(time * uVortexWobbleSpeed * (0.5 + rnd.y * 0.9) + phase * 1.7)
+      ) * uVortexWobble;
+      vec2 center = (id + 0.5 + (rnd - 0.5) * 0.8 + wobble) / grid;
+      vec2 d = p - center;
+      float dist = length(d);
+      float radius = max(uVortexRadius, 0.01) / grid;
+      float falloff = exp(-(dist * dist) / (radius * radius));
+      float dir = rnd.y > 0.5 ? 1.0 : -1.0;
+      float spin = sin(time * uVortexSpin * (0.7 + rnd.y * 0.6) + phase) * 0.5 + 0.75;
+      float angle = uVortexStrength * dir * spin * falloff;
+      angle += uVortexDrift * dir * falloff;
+      warped = center + mm2(angle) * (warped - center);
+      swirlSum += angle;
+    }
+  }
+  p = warped;
+  return swirlSum;
+}
+
+// Thin-film "oil on water" interference rainbow driven by film thickness.
+vec3 oilFilm(vec2 p, float swirl, float time) {
+  float thickness = triNoise2d(p * uOilScale + vec2(time * uOilSpeed * 0.1, -time * uOilSpeed * 0.07), 0.03, time);
+  thickness = thickness * 4.0 + swirl * 1.5;
+  vec3 rainbow = 0.5 + 0.5 * cos(TAU * (thickness * vec3(1.0, 1.35, 1.8) + vec3(0.0, 0.33, 0.67)));
+  return pow(rainbow, vec3(max(uOilContrast, 0.1)));
+}
+
 vec3 bg(vec3 rd) {
   float sd = dot(normalize(vec3(-0.5, -0.6, 0.9)), rd) * 0.5 + 0.5;
   sd = pow(sd, 5.0);
@@ -150,6 +212,8 @@ void main() {
   p.x *= uResolution.x / uResolution.y;
 
   float time = uTime * uTimeScale;
+
+  float swirl = vortexField(p, time);
 
   vec3 ro = vec3(0.0, uCamHeight, -uCamDistance);
   vec3 rd = normalize(vec3(p, 1.3));
@@ -175,6 +239,25 @@ void main() {
     vec3 waterTint = mix(vec3(0.2, 0.25, 0.5) * 0.08, vec3(0.3, 0.3, 0.5) * 0.7, nz2 * 0.4);
     col += waterTint * uReflectionTint;
     col *= mix(1.0, exp(-abs(rd.y) * uReflectionFog), uReflectionStrength);
+  }
+
+  // Twist the colors in the vortex shapes, then wash them with an
+  // iridescent oil-in-water interference film.
+  if (abs(uVortexColorShift) > 0.0001) {
+    float hueTwist = swirl * uVortexColorShift;
+    vec3 twist = vec3(
+      dot(col, vec3(0.6, 0.3, 0.1)),
+      dot(col, vec3(0.1, 0.6, 0.3)),
+      dot(col, vec3(0.3, 0.1, 0.6))
+    );
+    col = mix(col, twist, clamp(abs(hueTwist), 0.0, 1.0));
+    col.rb = mm2(hueTwist) * col.rb;
+    col = abs(col);
+  }
+  if (uOilStrength > 0.0001) {
+    vec3 film = oilFilm(p, swirl, time);
+    float lum = clamp(dot(col, vec3(0.299, 0.587, 0.114)) * 1.6, 0.0, 1.0);
+    col = mix(col, col * (0.35 + 1.3 * film) + film * lum * 0.55, uOilStrength);
   }
 
   outColor = vec4(col, 1.0);
