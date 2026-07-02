@@ -89,8 +89,9 @@ float noise(vec2 p) {
 
 const mat2 ROT = mat2(0.8, 0.6, -0.6, 0.8);
 
-// Fractional Brownian motion; octave count fixed for perf, amplitude
-// controlled by the caller for a variable-looking level of detail.
+// Fractional Brownian motion; the loop is capped at a fixed maximum of
+// 7 octaves for performance, while the actual octave count used is
+// controlled by the caller via the `octaves` argument.
 float fbm(vec2 p, int octaves) {
   float v = 0.0;
   float a = 0.5;
@@ -164,7 +165,7 @@ void buildBolt(vec2 start, vec2 end, float amp, float roughness, float seed, out
       vec2 pb = pts[i + half_];
       vec2 mid = (pa + pb) * 0.5;
       vec2 dir = pb - pa;
-      vec2 perp = normalize(vec2(-dir.y, dir.x) + 1e-6);
+      vec2 perp = normalize(vec2(-dir.y, dir.x) + vec2(1e-6));
       float n = hash(vec2(seed + float(i), float(level) * 17.13 + seed)) - 0.5;
       pts[i] = mid + perp * n * a;
     }
@@ -209,7 +210,7 @@ void buildBranch(vec2 start, vec2 end, float amp, float roughness, float seed, o
       vec2 pb = pts[i + half_];
       vec2 mid = (pa + pb) * 0.5;
       vec2 dir = pb - pa;
-      vec2 perp = normalize(vec2(-dir.y, dir.x) + 1e-6);
+      vec2 perp = normalize(vec2(-dir.y, dir.x) + vec2(1e-6));
       float n = hash(vec2(seed + float(i) * 3.1, float(level) * 9.7 + seed)) - 0.5;
       pts[i] = mid + perp * n * a;
     }
@@ -358,7 +359,7 @@ void main() {
       float along = 0.15 + 0.75 * hash1(bs + 1.0);
       int originIdx = int(along * float(BOLT_POINTS - 2));
       vec2 origin = pts[originIdx];
-      vec2 tangent = normalize(pts[min(originIdx + 1, BOLT_POINTS - 1)] - pts[max(originIdx - 1, 0)] + 1e-6);
+      vec2 tangent = normalize(pts[min(originIdx + 1, BOLT_POINTS - 1)] - pts[max(originIdx - 1, 0)] + vec2(1e-6));
       float spread = (hash1(bs + 2.0) - 0.5) * 2.0 * uBranchAngle;
       float ca = cos(spread);
       float sa = sin(spread);
