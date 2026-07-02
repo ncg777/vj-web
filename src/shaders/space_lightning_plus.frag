@@ -58,6 +58,10 @@ uniform vec3 uColorAccent;
 
 const float TAU = 6.28318530718;
 const float STRIKE_BASELINE = 0.12;
+// Bolt slots below this index stay anchored to the plasma core and are
+// never gated off; the rest scatter through the frame and flicker in
+// and out per strike cycle.
+const float ANCHORED_SLOTS = 2.0;
 
 // ---------------------------------------------------------------------
 // Hashing & noise primitives.
@@ -167,6 +171,8 @@ void main() {
   float voidMask = smoothstep(0.28, 0.62, voids);
 
   vec3 nebula = vec3(0.0);
+  // 3 layers (down from 4): the shared zone/void fields above buy more
+  // visible structure than a fourth layer at a fraction of its cost.
   const int LAYERS = 3;
   for (int layer = 0; layer < LAYERS; layer++) {
     float fl = float(layer);
@@ -266,10 +272,12 @@ void main() {
     // per strike cycle - activity naturally clusters and thins out.
     float slotN = fi / max(float(boltCount) - 1.0, 1.0);
     float gateBias = 0.85 - slotN * (0.55 + 0.35 * clamp(uStrikeChaos, 0.0, 2.0));
-    if (fi > 1.5 && hash1(hs * 3.7 + strikeIndex * 5.1 + seed * 2.3) > gateBias) {
+    if (fi >= ANCHORED_SLOTS && hash1(hs * 3.7 + strikeIndex * 5.1 + seed * 2.3) > gateBias) {
       continue;
     }
 
+    // A halved baseline keeps distributed strikes dim between flashes
+    // so the frame can breathe instead of staying permanently lit.
     float flash = STRIKE_BASELINE * 0.5 + 0.9 * exp(-strikePhase * (3.6 + uStrikeChaos * 6.0));
     flash *= smoothstep(0.0, 0.03, strikePhase);
     // Rapid intra-strike flicker, like a channel re-striking.
@@ -286,7 +294,7 @@ void main() {
     // channel is re-aimed back toward the frame so the discharge stays
     // on screen instead of erupting into empty space.
     vec2 strikeOrigin = vec2(0.0);
-    if (fi > 1.5) {
+    if (fi >= ANCHORED_SLOTS) {
       float originAng = hash1(strikeSeed + 5.4) * TAU;
       float originRadius = (0.15 + 0.75 * hash1(strikeSeed + 6.1)) * min(uZoom, 1.4);
       strikeOrigin = vec2(cos(originAng) * 1.35, sin(originAng)) * originRadius;
@@ -308,7 +316,7 @@ void main() {
     float sa = sin(baseAng);
     vec2 local = uv - strikeOrigin;
     vec2 p = vec2(ca * local.x + sa * local.y, -sa * local.x + ca * local.y);
-    if (fi <= 1.5) {
+    if (fi < ANCHORED_SLOTS) {
       p.x -= coreR * 0.35;
     }
 
