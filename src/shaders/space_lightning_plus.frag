@@ -57,11 +57,7 @@ uniform vec3 uColorSecondary;
 uniform vec3 uColorAccent;
 
 const float TAU = 6.28318530718;
-const float PI = 3.14159265359;
-const float FLOW_ATTENUATION = 0.8;
-const float DENSITY_SCALE = 0.85;
-const float DENSITY_BIAS = 0.4;
-const float STRIKE_BASELINE = 0.16;
+const float STRIKE_BASELINE = 0.12;
 
 // ---------------------------------------------------------------------
 // Hashing & noise primitives.
@@ -72,11 +68,6 @@ float hash1(float n) {
 
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
-vec2 hash2(vec2 p) {
-  float n = sin(dot(p, vec2(41.3, 289.1)));
-  return fract(vec2(262144.0, 32768.0) * n) - 0.5;
 }
 
 // C1-continuous value noise.
@@ -93,15 +84,10 @@ float noise(vec2 p) {
 
 const mat2 ROT = mat2(0.8, 0.6, -0.6, 0.8);
 
-// Fractional Brownian motion; the loop is capped at a fixed maximum of
-// 5 octaves for both performance and stability while the actual octave
-// count used is still controlled by the caller via the `octaves` argument.
-float fbm(vec2 p, int octaves) {
+float fbm4(vec2 p) {
   float v = 0.0;
   float a = 0.5;
-  int limit = min(octaves, 5);
-  for (int i = 0; i < 5; i++) {
-    if (i >= limit) break;
+  for (int i = 0; i < 4; i++) {
     v += a * noise(p);
     p = ROT * p * 2.02 + vec2(11.7, 5.1);
     a *= 0.5;
@@ -109,18 +95,37 @@ float fbm(vec2 p, int octaves) {
   return v;
 }
 
-// Curl of a scalar noise potential -> divergence-free velocity field,
-// used to advect the gas so it swirls and diffuses like a real fluid
-// instead of just scrolling.
-vec2 curlNoise(vec2 p) {
-  const float e = 0.085;
-  float n1 = fbm(p + vec2(0.0, e), 4);
-  float n2 = fbm(p - vec2(0.0, e), 4);
-  float n3 = fbm(p + vec2(e, 0.0), 4);
-  float n4 = fbm(p - vec2(e, 0.0), 4);
-  float dx = (n1 - n2) / (2.0 * e);
-  float dy = (n3 - n4) / (2.0 * e);
-  return vec2(dy, -dx);
+// ---------------------------------------------------------------------
+// Fractal 1D bolt path: signed lateral displacement of the discharge
+// channel as a function of the distance travelled along it. Summing a
+// few octaves of value noise whose per-octave gain is the user's
+// roughness gives the jagged, self-similar silhouette of a real
+// electric discharge - at a tiny fraction of the cost of building and
+// scanning an explicit midpoint-displacement polyline per pixel.
+// ---------------------------------------------------------------------
+float boltPath(float x, float seed, float gain) {
+  float v = 0.0;
+  float a = 0.55;
+  float f = 2.4;
+  for (int i = 0; i < 4; i++) {
+    v += a * (noise(vec2(x * f + seed * 7.31, seed)) - 0.5);
+    f *= 2.3;
+    a *= gain;
+  }
+  return v;
+}
+
+// Cheaper 3-octave variant for secondary branches.
+float branchPath(float x, float seed, float gain) {
+  float v = 0.0;
+  float a = 0.55;
+  float f = 3.1;
+  for (int i = 0; i < 3; i++) {
+    v += a * (noise(vec2(x * f + seed * 3.17, seed)) - 0.5);
+    f *= 2.3;
+    a *= gain;
+  }
+  return v;
 }
 
 // A richer palette that keeps the gas vivid and chromatic while still
@@ -131,108 +136,6 @@ vec3 palette(float t) {
   vec3 warm = mix(uColorPrimary, uColorSecondary, 0.35 + 0.25 * smoothstep(0.0, 1.0, hue));
   vec3 cool = mix(uColorAccent, vec3(1.0), 0.1 + 0.2 * pulse);
   return mix(warm, cool, smoothstep(0.3, 0.75, hue)) * (0.75 + 0.55 * pulse);
-}
-
-// Smallest signed periodic angular difference, continuous everywhere.
-float angDiff(float a, float b) {
-  return atan(sin(a - b), cos(a - b));
-}
-
-float sdSegment(vec2 p, vec2 a, vec2 b) {
-  vec2 pa = p - a;
-  vec2 ba = b - a;
-  float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-  return length(pa - ba * h);
-}
-
-// ---------------------------------------------------------------------
-// Fractal midpoint-displacement lightning bolt.
-//
-// A straight segment between `start` and `end` is recursively bisected;
-// at every subdivision the new midpoint is displaced perpendicular to
-// the segment by an amount that shrinks with a Hurst-style roughness
-// exponent each generation. This is the classic algorithm used to
-// synthesize realistic fractal lightning / terrain silhouettes, and it
-// naturally produces the jagged, self-similar look of a real electric
-// discharge. The resulting polyline's minimum distance to `p` (and its
-// normalized arc-length position) are returned so branches and glow can
-// be evaluated from it.
-// ---------------------------------------------------------------------
-const int BOLT_DEPTH = 5;
-const int BOLT_POINTS = 33; // 2^BOLT_DEPTH + 1
-
-void buildBolt(vec2 start, vec2 end, float amp, float roughness, float seed, out vec2 pts[BOLT_POINTS]) {
-  pts[0] = start;
-  pts[BOLT_POINTS - 1] = end;
-  int step = BOLT_POINTS - 1;
-  float a = amp;
-  for (int level = 0; level < BOLT_DEPTH; level++) {
-    int half_ = step / 2;
-    for (int i = half_; i < BOLT_POINTS - 1; i += step) {
-      vec2 pa = pts[i - half_];
-      vec2 pb = pts[i + half_];
-      vec2 mid = (pa + pb) * 0.5;
-      vec2 dir = pb - pa;
-      vec2 perp = normalize(vec2(-dir.y, dir.x) + vec2(1e-6));
-      float n = hash(vec2(seed + float(i), float(level) * 17.13 + seed)) - 0.5;
-      pts[i] = mid + perp * n * a;
-    }
-    a *= roughness;
-    step = half_;
-  }
-}
-
-// Distance from p to the fractal bolt polyline; also returns the
-// normalized arc-length parameter (0 at the root, 1 at the tip) of the
-// closest segment via `tOut`, and the index of the closest segment via
-// `iOut`, so branch spawn points can be placed procedurally along it.
-float boltDistance(vec2 p, vec2 pts[BOLT_POINTS], out float tOut, out int iOut) {
-  float best = 1e9;
-  float bestT = 0.0;
-  int bestI = 0;
-  for (int i = 0; i < BOLT_POINTS - 1; i++) {
-    float d = sdSegment(p, pts[i], pts[i + 1]);
-    if (d < best) {
-      best = d;
-      bestT = float(i) / float(BOLT_POINTS - 2);
-      bestI = i;
-    }
-  }
-  tOut = bestT;
-  iOut = bestI;
-  return best;
-}
-
-const int BRANCH_DEPTH = 3;
-const int BRANCH_POINTS = 9; // 2^BRANCH_DEPTH + 1
-
-void buildBranch(vec2 start, vec2 end, float amp, float roughness, float seed, out vec2 pts[BRANCH_POINTS]) {
-  pts[0] = start;
-  pts[BRANCH_POINTS - 1] = end;
-  int step = BRANCH_POINTS - 1;
-  float a = amp;
-  for (int level = 0; level < BRANCH_DEPTH; level++) {
-    int half_ = step / 2;
-    for (int i = half_; i < BRANCH_POINTS - 1; i += step) {
-      vec2 pa = pts[i - half_];
-      vec2 pb = pts[i + half_];
-      vec2 mid = (pa + pb) * 0.5;
-      vec2 dir = pb - pa;
-      vec2 perp = normalize(vec2(-dir.y, dir.x) + vec2(1e-6));
-      float n = hash(vec2(seed + float(i) * 3.1, float(level) * 9.7 + seed)) - 0.5;
-      pts[i] = mid + perp * n * a;
-    }
-    a *= roughness;
-    step = half_;
-  }
-}
-
-float branchDistance(vec2 p, vec2 pts[BRANCH_POINTS]) {
-  float best = 1e9;
-  for (int i = 0; i < BRANCH_POINTS - 1; i++) {
-    best = min(best, sdSegment(p, pts[i], pts[i + 1]));
-  }
-  return best;
 }
 
 void main() {
@@ -248,11 +151,11 @@ void main() {
   uv = rot * uv;
 
   float radius = length(uv) + 1e-4;
-  float angle = atan(uv.y, uv.x);
 
   // ------------------------------------------------------------------
-  // Nebula: several parallax layers of curl-advected fbm gas, each
-  // diffusing at its own depth/speed for a complex dynamic cloudscape.
+  // Nebula: parallax layers of domain-warped fbm gas. The old
+  // finite-difference curl advection cost 16 fbm evaluations per layer;
+  // an analytic swirl warp gives the same fluid drift for almost free.
   // ------------------------------------------------------------------
   vec3 nebula = vec3(0.0);
   const int LAYERS = 3;
@@ -261,40 +164,40 @@ void main() {
     float depth = 1.0 + fl * uParallax;
     vec2 lp = uv * (0.9 + fl * 0.55) * uCloudDetail + seed * (fl + 1.0) * 3.7;
 
-    // Curl-noise domain warp: divergence-free advection gives the gas a
-    // genuinely fluid, swirling diffusion instead of a simple scroll.
+    // Analytic swirl: a rotating sinusoidal displacement field that is
+    // divergence-free by construction, so the gas swirls instead of
+    // scrolling, without any extra noise fetches.
     float tc = t * uCloudSpeed;
-    vec2 flow = curlNoise(lp * 0.6 + tc * (0.05 + 0.03 * fl)) * uCurlStrength;
-    vec2 warped = lp + flow * FLOW_ATTENUATION + tc * (0.04 / depth) * vec2(1.0, 0.4);
+    float sw = tc * (0.16 + 0.09 * fl);
+    vec2 flow = uCurlStrength * 0.28 * vec2(
+      sin(lp.y * 1.3 + sw) + 0.5 * sin(lp.y * 2.9 - sw * 1.7),
+      sin(lp.x * 1.4 - sw) + 0.5 * sin(lp.x * 2.6 + sw * 1.3)
+    );
+    vec2 warped = lp + flow + tc * (0.04 / depth) * vec2(1.0, 0.4);
 
     vec2 q = vec2(
-      fbm(warped + vec2(0.0, 0.0), 5),
-      fbm(warped + vec2(5.2, 1.3), 5)
+      fbm4(warped),
+      fbm4(warped + vec2(5.2, 1.3))
     );
-    vec2 r2 = vec2(
-      fbm(warped + (1.1 + uWarp) * q + vec2(1.7, 9.2), 5),
-      fbm(warped + (1.1 + uWarp) * q + vec2(8.3, 2.8), 5)
-    );
-    float f = fbm(warped + (1.4 + uWarp) * r2, 5);
+    float f = fbm4(warped + (1.3 + uWarp) * q);
 
-    // Fine turbulent detail layered on top for wispy filaments and a
-    // smoother, more organic diffuse cloud field.
-    float fine = fbm(warped * 3.2 - tc * 0.28, 4);
+    // Fine turbulent detail layered on top for wispy filaments.
+    float fine = fbm4(warped * 3.2 - tc * 0.28);
     float blended = mix(f, fine, clamp(uTurbulence, 0.0, 1.0) * 0.45);
     float density = smoothstep(uCloudDensity - 0.21, uCloudDensity + 0.24, blended);
     density = pow(density, mix(1.0, 3.0, clamp(uCloudContrast, 0.0, 1.0)));
 
-    float chroma = 0.25 + 0.75 * fbm(warped * 1.45 + tc * 0.12, 4);
+    float chroma = 0.25 + 0.75 * q.y;
     vec3 gasA = palette(blended * 1.35 + radius * 0.16 + fl * 0.31 + chroma * 0.2);
-    vec3 gasB = palette(length(q) * 1.05 + 0.28 + fl * 0.17 + length(flow) * 0.08);
-    vec3 gasC = palette(length(r2) * 0.8 + 0.64 - fl * 0.12 + chroma * 0.32);
+    vec3 gasB = palette(length(q) * 1.05 + 0.28 + fl * 0.17);
+    vec3 gasC = palette(f * 0.8 + 0.64 - fl * 0.12 + chroma * 0.32);
     vec3 layerCol = mix(gasA, gasB, clamp(length(q) * 1.25 + chroma * 0.28 - 0.12, 0.0, 1.0));
-    layerCol = mix(layerCol, gasC, clamp(r2.x * r2.x * 1.4 - 0.16 + length(flow) * 0.08, 0.0, 1.0));
-    layerCol *= DENSITY_SCALE + DENSITY_BIAS * density;
+    layerCol = mix(layerCol, gasC, clamp(f * f * 1.4 - 0.16, 0.0, 1.0));
+    layerCol *= 0.85 + 0.4 * density;
 
     nebula += max(layerCol, 0.0) * density / depth;
   }
-  nebula /= float(LAYERS) * 0.6;
+  nebula /= float(LAYERS) * 0.75;
 
   // Sparse cosmic starfield twinkling behind/within the gas.
   vec2 starCell = floor(uv * (28.0 + uStarDensity * 40.0));
@@ -306,14 +209,20 @@ void main() {
   nebula += star * palette(starHash + t * 0.02);
 
   // ------------------------------------------------------------------
-  // Lightning: fractal branching bolts erupting from the core in every
-  // direction, each one re-randomized on every discrete strike for a
-  // true flickering, non-repeating electrical storm.
+  // Lightning: jagged fractal bolts erupting radially from the core.
+  // Each bolt lives in its own rotated frame where the channel runs
+  // along +x and is laterally displaced by a fractal 1D path, so the
+  // distance to the channel is a single subtraction - no polylines.
+  // Every discrete strike re-seeds the path, so each flash is a brand
+  // new discharge that flares white-hot and decays.
   // ------------------------------------------------------------------
-  float bolts = 0.0;
+  float boltCore = 0.0;
+  float boltGlow = 0.0;
   vec3 boltGlowColor = vec3(0.0);
   int boltCount = int(clamp(uBoltCount, 1.0, 10.0));
   float coreR = max(uCoreSize * 0.5, 0.04);
+  float gain = clamp(uRoughness, 0.1, 0.9);
+  int branchCount = int(clamp(uBranchCount, 0.0, 6.0));
 
   for (int i = 0; i < 10; i++) {
     if (i >= boltCount) break;
@@ -321,76 +230,104 @@ void main() {
     float hs = fi * 12.9 + seed * 91.7;
 
     // Discrete strike timeline: each bolt fires periodically and is
-    // reshaped from scratch on every strike (unique random seed per
-    // strike index), then flashes bright and decays quickly - the
-    // hallmark of a real electric discharge rather than a static shape.
+    // reshaped from scratch on every strike, then flashes bright and
+    // decays quickly - the hallmark of a real electric discharge.
     float rate = max(uStrikeRate, 0.05) * (0.6 + 0.8 * hash1(hs + 1.0));
     float cycle = t * rate + hash1(hs) * 50.0;
     float strikeIndex = floor(cycle);
     float strikePhase = fract(cycle);
-    float strikeSeed = hs + strikeIndex * 71.3 * (1.0 + uStrikeChaos);
+    float strikeSeed = fract(hash1(hs + strikeIndex * (1.0 + uStrikeChaos * 3.0))) * 61.7 + 3.0;
 
-    // The strike envelope now stays alive slightly between bursts, which
-    // cuts the hard popping from the previous stepwise lifecycle.
-    float flash = STRIKE_BASELINE + 0.84 * exp(-strikePhase * (3.6 + uStrikeChaos * 6.0));
-    flash *= smoothstep(0.0, 0.04, strikePhase);
-    flash *= 0.7 + 0.3 * sin(cycle * 0.8 + hash1(hs + 2.0) * TAU);
-
-    float baseAng = hash1(strikeSeed + 3.1) * TAU;
-    float reach = uBoltReach * (0.5 + hash1(strikeSeed + 4.2));
-    vec2 start = coreR * vec2(cos(baseAng), sin(baseAng)) * 0.6;
-    vec2 end = start + reach * vec2(cos(baseAng + (hash1(strikeSeed + 5.3) - 0.5) * 0.8),
-                                     sin(baseAng + (hash1(strikeSeed + 5.3) - 0.5) * 0.8));
-
-    vec2 pts[BOLT_POINTS];
-    float amp = uJaggedness * reach * 0.5;
-    buildBolt(start, end, amp, clamp(uRoughness, 0.05, 0.95), strikeSeed, pts);
-
-    float tParam;
-    int segIdx;
-    float d = boltDistance(uv, pts, tParam, segIdx);
-
-    float w = uBoltWidth * (0.4 + 0.6 * (1.0 - tParam)) * 0.02;
-    float ray = exp(-pow(d / max(w, 1e-4), 2.0));
-    float glow = exp(-pow(d / (max(w, 1e-4) * (6.0 + uBloomRadius * 14.0)), 2.0));
+    float flash = STRIKE_BASELINE + 0.88 * exp(-strikePhase * (3.6 + uStrikeChaos * 6.0));
+    flash *= smoothstep(0.0, 0.03, strikePhase);
+    // Rapid intra-strike flicker, like a channel re-striking.
+    flash *= 0.75 + 0.25 * sin((strikePhase * 40.0 + hash1(hs + 2.0) * TAU) * (1.0 + uStrikeChaos));
 
     float energy = flash * uBoltIntensity;
-    bolts += ray * energy * 2.4;
-    bolts += glow * energy * uBloomIntensity * 0.5;
-    boltGlowColor += glow * energy * palette(tParam * 0.6 + fi * 0.21);
 
-    // Secondary forks branching off the main channel at pseudo-random
-    // points, each a smaller fractal bolt of its own with a decayed
-    // amplitude and width - real lightning branches recursively too.
-    int branchCount = int(clamp(uBranchCount, 0.0, 6.0));
+    float baseAng = hash1(strikeSeed + 3.1) * TAU;
+    float reach = uBoltReach * (0.55 + 0.65 * hash1(strikeSeed + 4.2));
+
+    // Rotate into the bolt frame: channel along +x from the core edge.
+    float ca = cos(baseAng);
+    float sa = sin(baseAng);
+    vec2 p = vec2(ca * uv.x + sa * uv.y, -sa * uv.x + ca * uv.y);
+    p.x -= coreR * 0.35;
+
+    float along = clamp(p.x / reach, 0.0, 1.0);
+
+    // Capsule-style distance: past either end of the channel the
+    // longitudinal overshoot is folded into the distance, so the wide
+    // glow tapers off in soft round caps instead of hard-edged strips.
+    float overX = max(max(-p.x, p.x - reach), 0.0);
+
+    // Conservative cull: pixels provably far from everything this bolt
+    // (and its forks) can touch skip all the fractal path evaluation.
+    float ampMax = uJaggedness * reach * 0.55;
+    float gwMax = uBoltWidth * 0.004 * (14.0 + uBloomRadius * 30.0);
+    float forkSpan = branchCount > 0 ? reach * 0.85 * uForkiness : 0.0;
+    if (length(vec2(overX, max(abs(p.y) - ampMax, 0.0))) > forkSpan + gwMax * 14.0) {
+      continue;
+    }
+
+    // Amplitude envelope: pinned at the core, widening as it travels.
+    float ampEnv = ampMax * smoothstep(0.0, 0.25, along);
+    float offset = boltPath(p.x, strikeSeed, gain) * ampEnv;
+    float d = length(vec2(overX, p.y - offset));
+
+    // White-hot filament plus a wide soft glow (inverse falloff reads
+    // as an over-exposed electric arc far better than a gaussian).
+    float w = uBoltWidth * (1.0 - 0.55 * along) * 0.004;
+    float ray = w / (d + w);
+    ray *= ray;
+    float gw = w * (14.0 + uBloomRadius * 30.0);
+    float glow = gw / (d + gw);
+
+    boltCore += ray * energy;
+    boltGlow += glow * glow * energy * uBloomIntensity * 0.3;
+    boltGlowColor += glow * glow * energy * palette(along * 0.6 + fi * 0.21);
+
+    // Secondary forks: thinner fractal channels splitting off the main
+    // one at pseudo-random points, inheriting its exact offset there so
+    // they stay attached, then decaying in width and length.
     for (int b = 0; b < 6; b++) {
-      if (b >= branchCount) continue;
+      if (b >= branchCount) break;
       float fb = float(b);
       float bs = strikeSeed + fb * 33.7 + 5.0;
-      float along = 0.15 + 0.75 * hash1(bs + 1.0);
-      int originIdx = int(along * float(BOLT_POINTS - 2));
-      vec2 origin = pts[originIdx];
-      vec2 tangent = normalize(pts[min(originIdx + 1, BOLT_POINTS - 1)] - pts[max(originIdx - 1, 0)] + vec2(1e-6));
+      float bAlong = (0.12 + 0.6 * hash1(bs + 1.0)) * reach;
+      float blen = (reach - bAlong) * (0.35 + 0.5 * hash1(bs + 3.0)) * uForkiness;
+
+      // Cheap cull before any noise: the branch lives inside a disc
+      // around its (approximate) origin on the main channel.
+      float bAmpMax = uJaggedness * blen * uBranchDecay * 0.6;
+      float bgwMax = gwMax * uBranchDecay;
+      if (length(p - vec2(bAlong, 0.0)) > ampMax + blen + bAmpMax + bgwMax * 12.0) {
+        continue;
+      }
+
+      vec2 origin = vec2(bAlong, boltPath(bAlong, strikeSeed, gain) * ampMax * smoothstep(0.0, 0.25, bAlong / reach));
       float spread = (hash1(bs + 2.0) - 0.5) * 2.0 * uBranchAngle;
-      float ca = cos(spread);
-      float sa = sin(spread);
-      vec2 dir = mat2(ca, -sa, sa, ca) * tangent;
-      float blen = reach * (1.0 - along) * (0.4 + 0.5 * hash1(bs + 3.0)) * uForkiness;
-      vec2 bend = origin + dir * blen;
+      float cb = cos(spread);
+      float sb = sin(spread);
+      vec2 q2 = p - origin;
+      vec2 bp = vec2(cb * q2.x + sb * q2.y, -sb * q2.x + cb * q2.y);
 
-      vec2 bpts[BRANCH_POINTS];
-      float bamp = amp * uBranchDecay * (1.0 - along * 0.5);
-      buildBranch(origin, bend, bamp, clamp(uRoughness, 0.05, 0.95), bs, bpts);
+      float bAlongN = clamp(bp.x / max(blen, 1e-3), 0.0, 1.0);
+      float bAmp = uJaggedness * blen * uBranchDecay * 0.6 * smoothstep(0.0, 0.3, bAlongN);
+      float bOffset = branchPath(bp.x, bs, gain) * bAmp;
+      float bOverX = max(max(-bp.x, bp.x - blen), 0.0);
+      float bd = length(vec2(bOverX, bp.y - bOffset));
 
-      float bd = branchDistance(uv, bpts);
-      float bw = w * uBranchDecay * 1.1;
-      float bray = exp(-pow(bd / max(bw, 1e-4), 2.0));
-      float bglow = exp(-pow(bd / (max(bw, 1e-4) * (6.0 + uBloomRadius * 14.0)), 2.0));
-      float benergy = energy * (0.55 + 0.25 * hash1(bs + 4.0));
+      float bw = w * uBranchDecay;
+      float bray = bw / (bd + bw);
+      bray *= bray;
+      float bgw = bw * (12.0 + uBloomRadius * 24.0);
+      float bglow = bgw / (bd + bgw);
+      float benergy = energy * (0.5 + 0.3 * hash1(bs + 4.0));
 
-      bolts += bray * benergy * 2.0;
-      bolts += bglow * benergy * uBloomIntensity * 0.4;
-      boltGlowColor += bglow * benergy * palette(along * 0.6 + fb * 0.13 + fi * 0.21);
+      boltCore += bray * benergy * 0.85;
+      boltGlow += bglow * bglow * benergy * uBloomIntensity * 0.22;
+      boltGlowColor += bglow * bglow * benergy * palette(bAlongN * 0.6 + fb * 0.13 + fi * 0.21);
     }
   }
 
@@ -411,14 +348,15 @@ void main() {
   // ------------------------------------------------------------------
   float vignette = smoothstep(2.6, 0.3, radius * mix(1.0, 1.6, clamp(uVignette, 0.0, 1.0)));
 
-  vec3 boltColor = mix(boltGlowColor, vec3(1.0), 0.5);
   vec3 col = nebula * (0.5 + 0.5 * vignette);
-  col += boltColor * bolts * (0.4 + 0.6 * vignette);
+  // Filament is near-white (over-exposed channel), glow carries color.
+  col += vec3(1.0) * boltCore * 2.2;
+  col += (boltGlowColor + vec3(0.25) * boltGlow) * (0.4 + 0.6 * vignette);
   col += mix(palette(0.05), vec3(1.0), 0.4) * core;
   col.r += coreR_ * 0.15;
   col.b += coreB_ * 0.15;
   // Bolts electrify the gas they pass through, lighting it from within.
-  col += nebula * bolts * 0.7;
+  col += nebula * (boltCore * 1.6 + boltGlow) * 0.6;
 
   // Filmic-ish exposure keeps highlights crisp and blacks deep.
   col = 1.0 - exp(-col * max(uExposure, 0.05));

@@ -1664,7 +1664,7 @@ export const animations: AnimationConfig[] = [
     id: "space-lightning-plus",
     name: "Space Lightning Plus",
     description:
-      "Fractal branching lightning storms discharging through swirling, curl-noise-advected gas clouds.",
+      "Fractal branching lightning storms discharging through swirling, domain-warped gas clouds.",
     fragment: spaceLightningPlusFrag,
     resolutionUniform: "uResolution",
     timeUniform: "uTime",
