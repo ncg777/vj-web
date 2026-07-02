@@ -260,7 +260,10 @@ void main() {
       continue;
     }
 
-    float flash = STRIKE_BASELINE * 0.3 + 0.92 * exp(-strikePhase * (3.6 + uStrikeChaos * 6.0));
+    // Distributed strikes stay dimmer between flashes so the frame can
+    // breathe instead of reading as a permanently lit starburst.
+    float flashBaseline = STRIKE_BASELINE * 0.3;
+    float flash = flashBaseline + 0.92 * exp(-strikePhase * (3.6 + uStrikeChaos * 6.0));
     flash *= smoothstep(0.0, 0.03, strikePhase);
     // Rapid intra-strike flicker, like a channel re-striking.
     flash *= 0.75 + 0.25 * sin((strikePhase * 40.0 + hash1(hs + 2.0) * TAU) * (1.0 + uStrikeChaos));
