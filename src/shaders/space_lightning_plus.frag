@@ -58,6 +58,10 @@ uniform vec3 uColorAccent;
 
 const float TAU = 6.28318530718;
 const float PI = 3.14159265359;
+const float FLOW_ATTENUATION = 0.8;
+const float DENSITY_SCALE = 0.85;
+const float DENSITY_BIAS = 0.4;
+const float STRIKE_BASELINE = 0.16;
 
 // ---------------------------------------------------------------------
 // Hashing & noise primitives.
@@ -261,7 +265,7 @@ void main() {
     // genuinely fluid, swirling diffusion instead of a simple scroll.
     float tc = t * uCloudSpeed;
     vec2 flow = curlNoise(lp * 0.6 + tc * (0.05 + 0.03 * fl)) * uCurlStrength;
-    vec2 warped = lp + flow * 0.8 + tc * (0.04 / depth) * vec2(1.0, 0.4);
+    vec2 warped = lp + flow * FLOW_ATTENUATION + tc * (0.04 / depth) * vec2(1.0, 0.4);
 
     vec2 q = vec2(
       fbm(warped + vec2(0.0, 0.0), 5),
@@ -286,7 +290,7 @@ void main() {
     vec3 gasC = palette(length(r2) * 0.8 + 0.64 - fl * 0.12 + chroma * 0.32);
     vec3 layerCol = mix(gasA, gasB, clamp(length(q) * 1.25 + chroma * 0.28 - 0.12, 0.0, 1.0));
     layerCol = mix(layerCol, gasC, clamp(r2.x * r2.x * 1.4 - 0.16 + length(flow) * 0.08, 0.0, 1.0));
-    layerCol *= 0.85 + 0.4 * density;
+    layerCol *= DENSITY_SCALE + DENSITY_BIAS * density;
 
     nebula += max(layerCol, 0.0) * density / depth;
   }
@@ -328,7 +332,7 @@ void main() {
 
     // The strike envelope now stays alive slightly between bursts, which
     // cuts the hard popping from the previous stepwise lifecycle.
-    float flash = 0.16 + 0.84 * exp(-strikePhase * (3.6 + uStrikeChaos * 6.0));
+    float flash = STRIKE_BASELINE + 0.84 * exp(-strikePhase * (3.6 + uStrikeChaos * 6.0));
     flash *= smoothstep(0.0, 0.04, strikePhase);
     flash *= 0.7 + 0.3 * sin(cycle * 0.8 + hash1(hs + 2.0) * TAU);
 
