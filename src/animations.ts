@@ -1663,7 +1663,7 @@ export const animations: AnimationConfig[] = [
     id: "thunderstorm",
     name: "Thunderstorm",
     description:
-      "Top-down view of a thunderstorm over dense clouds with sporadic branching lightning.",
+      "Top-down storm clouds with stepped-leader lightning, return strokes, restrikes, and branching plasma channels.",
     fragment: thunderstormFrag,
     resolutionUniform: "uResolution",
     timeUniform: "uTime",
