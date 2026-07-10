@@ -2259,7 +2259,9 @@ float vortexField(inout vec2 p, float time) {
       vec2 d = p - center;
       float dist = length(d);
       float radius = max(uVortexRadius, 0.01) / grid;
-      float falloff = exp(-(dist * dist) / (radius * radius));
+      vec2 cellDistance = abs(gp - (id + 0.5));
+      vec2 cellFade = 1.0 - smoothstep(vec2(1.0), vec2(1.5), cellDistance);
+      float falloff = exp(-(dist * dist) / (radius * radius)) * cellFade.x * cellFade.y;
       float dir = rnd.y > 0.5 ? 1.0 : -1.0;
       float spin = sin(time * uVortexSpin * (0.7 + rnd.y * 0.6) + phase) * 0.5 + 0.75;
       float angle = uVortexStrength * dir * spin * falloff;
