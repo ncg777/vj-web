@@ -3325,6 +3325,15 @@ If you want to offset all timestamps of a track such that the first one is zero,
         </div>
       </main>
     </div>
+    <footer class="App-footer">
+      <a
+        href="https://paypal.me/ncg7777"
+        target="_blank"
+        rel="noreferrer"
+      >
+        ❤️ Support VJ Lab
+      </a>
+    </footer>
   </div>
 `;const k=document.querySelector("#gl-canvas"),ee=document.querySelector("#scene-list"),nt=document.querySelector("#control-list"),Fe=document.querySelector("#panel-actions"),se=document.querySelector("#key-help"),We=document.querySelector("#hud-title"),Zt=document.querySelector("#hud-desc"),Ne=document.querySelector("[data-action='toggle-sidebar']"),yt=document.querySelector(".stage");if(!k||!ee||!nt||!Fe||!se||!We||!Zt||!Ne||!yt)throw new Error("Missing required UI elements");const s=k.getContext("webgl2",{antialias:!0});if(!s)throw yt.innerHTML=`
     <div class="fallback">
