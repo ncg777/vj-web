@@ -95,6 +95,14 @@ float fbm(vec2 p) {
   return value;
 }
 
+// Sample fbm in a domain that is continuous under theta -> theta + TAU by
+// embedding the angle on a circle. angScale is the linear arc length of the
+// full loop in noise-space (matching a former thetaNorm * angScale span).
+float polarFbm(float theta, float radial, float angScale, float radScale, vec2 seed) {
+  float r = angScale / TAU;
+  return fbm(vec2(cos(theta), sin(theta)) * r + vec2(radial * radScale, 0.0) + seed);
+}
+
 vec3 hsv2rgb(vec3 c) {
   vec3 p = abs(fract(c.xxx + vec3(0.0, 0.6666667, 0.3333333)) * 6.0 - 3.0);
   return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
@@ -194,26 +202,35 @@ void main() {
 
     // Progressive painting: each stroke is drawn around its loop over a
     // cycle, lingers, then washes out before being repainted.
+    // thetaNorm is shifted per-loop so start angles differ; paintExtent is
+    // stretched by `soft` so that when travel reaches 1 the soft front has
+    // fully wrapped and the ring closes with no residual radial gap.
     float cycle = mix(uCycleMin, uCycleMax, hash11(fi * 2.71));
     float phase = fract(time / max(cycle, EPSILON) + hash11(fi * 41.3));
     float paintOn = smoothstep(0.0, 0.06, phase) * (1.0 - smoothstep(0.86, 0.99, phase));
     float travel = smoothstep(0.02, 0.62, phase);
     float thetaNorm = fract(theta / TAU + hash11(fi * 47.9));
     float soft = max(uDrawSoftness, EPSILON);
-    float reveal = smoothstep(travel, travel - soft, thetaNorm);
+    float paintExtent = travel * (1.0 + soft);
+    float reveal = 1.0 - smoothstep(paintExtent - soft, paintExtent, thetaNorm);
 
     float width = baseR * mix(uStrokeWidthMin, uStrokeWidthMax, hash11(fi * 31.7));
     width *= 1.0 + uWidthMod * sin(theta * 3.0 + hash11(fi * 53.3) * TAU + time * uMorphSpeed * 0.4);
     width = max(width, EPSILON);
 
-    float ink = mix(1.0 - uInkTexture, 1.0, fbm(vec2(thetaNorm * 6.0 + fi * 0.7, fi * 1.3 + signedDist * 18.0)));
+    // Angle must enter noise via cos/sin so ink/bleed are seamless on the loop.
+    float ink = mix(
+      1.0 - uInkTexture,
+      1.0,
+      polarFbm(theta, signedDist, 6.0, 18.0, vec2(fi * 0.7, fi * 1.3))
+    );
     float strokeCore = smoothstep(width * 1.5, width * 0.35, abs(signedDist));
     float strokeMask = strokeCore * reveal * paintOn * ink;
 
     float bleedSpread = max(width * uBleedSpread, EPSILON);
     float bleed =
       exp(-pow(signedDist / bleedSpread, 2.0)) *
-      (0.45 + 0.55 * fbm(vec2(fi * 0.7, theta * 2.2 + dist * 9.0))) *
+      (0.45 + 0.55 * polarFbm(theta, dist, 2.2 * TAU, 9.0, vec2(fi * 0.7, 3.1))) *
       reveal * paintOn * uBleedStrength;
 
     float soak =
