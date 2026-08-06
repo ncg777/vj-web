@@ -103,23 +103,36 @@ float polarFbm(float theta, float radial, float angScale, float radScale, vec2 s
   return fbm(vec2(cos(theta), sin(theta)) * r + vec2(radial * radScale, 0.0) + seed);
 }
 
-// Coverage for a growing arc on the unit circle [0,1). Soft falloff uses
-// circular distance to the painted set so the brush head and origin never
-// leave a hard radial cut. When arcLen reaches 1 the whole loop is covered.
+// Smooth brush window along a 1D stroke parameter: fade in at the tail,
+// hold, then fade out at the head. edge is clamped so short strokes still
+// taper instead of inverting.
+float strokeWindow(float u, float extent, float edge) {
+  float e = min(max(edge, EPSILON), max(extent * 0.49, EPSILON));
+  float fadeIn = smoothstep(0.0, e, u);
+  float fadeOut = 1.0 - smoothstep(extent - e, extent, u);
+  return clamp(fadeIn * fadeOut, 0.0, 1.0);
+}
+
+// Growing loop stroke on the unit circle [0,1). Both ends taper radially
+// (angularly) so the origin is never a hard cut. Near closure the head
+// overshoots past a full turn and overlaps the faded tail; max() of the
+// two laps blends the join without a seam. When fully drawn the solid
+// middles overlap and the ring is uniform.
 float loopArcReveal(float thetaNorm, float arcLen, float soft) {
-  float len = clamp(arcLen, 0.0, 1.0);
-  float edge = max(soft, EPSILON);
   float t = fract(thetaNorm);
+  float edge = max(soft, EPSILON);
+  float len = clamp(arcLen, 0.0, 1.0);
 
-  // Exterior gap is the open arc (len, 1). Distance to the painted arc is the
-  // distance to the nearer endpoint along the circle (0 when inside the arc).
-  float inGap = step(len, t);
-  float distOut = inGap * min(t - len, 1.0 - t);
+  // Early on: a little head runway for a soft brush tip.
+  // Near the end: enough overshoot that the head's solid body covers the
+  // tail fade, then the head fade settles across the join.
+  float close = smoothstep(0.55, 0.98, len);
+  float extent = len + edge * mix(0.55, 2.15, close);
 
-  // Force a fully closed ring once travel finishes; avoid tiny residual gaps.
-  float closed = step(1.0 - EPSILON, len);
-  float openReveal = 1.0 - smoothstep(0.0, edge, distOut);
-  return mix(openReveal, 1.0, closed);
+  float reveal = strokeWindow(t, extent, edge);
+  // Second lap: head wrapping over the origin / tail.
+  reveal = max(reveal, strokeWindow(t + 1.0, extent, edge));
+  return reveal;
 }
 
 vec3 hsv2rgb(vec3 c) {
@@ -219,10 +232,9 @@ void main() {
     float radius = baseR * loopRadius(theta, fi, time);
     float signedDist = dist - radius;
 
-    // Progressive painting: each stroke grows as a circular arc around its
-    // loop, lingers as a fully closed ring, then washes out before repaint.
-    // Start angle is hashed per loop; coverage uses circular distance so the
-    // origin and the brush head never introduce a radial seam.
+    // Progressive painting: each stroke grows around its loop with faded
+    // tail/head, overlaps itself as it closes, lingers as a solid ring, then
+    // washes out before repaint. Start angle is hashed per loop.
     float cycle = mix(uCycleMin, uCycleMax, hash11(fi * 2.71));
     float phase = fract(time / max(cycle, EPSILON) + hash11(fi * 41.3));
     float paintOn = smoothstep(0.0, 0.06, phase) * (1.0 - smoothstep(0.86, 0.99, phase));

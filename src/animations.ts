@@ -822,7 +822,7 @@ export const animations: AnimationConfig[] = [
       { id: "strokeWidthMax", label: "Stroke Width Max", uniform: "uStrokeWidthMax", type: "float", value: 0.22, min: 0.02, max: 1.2, step: 0.01 },
       { id: "widthMod", label: "Width Modulation", uniform: "uWidthMod", type: "float", value: 0.4, min: 0.0, max: 1.0, step: 0.02 },
       { id: "inkTexture", label: "Ink Texture", uniform: "uInkTexture", type: "float", value: 0.55, min: 0.0, max: 1.0, step: 0.02 },
-      { id: "drawSoftness", label: "Draw Softness", uniform: "uDrawSoftness", type: "float", value: 0.12, min: 0.01, max: 0.5, step: 0.01 },
+      { id: "drawSoftness", label: "Draw Softness", uniform: "uDrawSoftness", type: "float", value: 0.16, min: 0.02, max: 0.55, step: 0.01 },
       { id: "bleedStrength", label: "Bleed Strength", uniform: "uBleedStrength", type: "float", value: 1.1, min: 0.0, max: 3.0, step: 0.02 },
       { id: "bleedSpread", label: "Bleed Spread", uniform: "uBleedSpread", type: "float", value: 3.2, min: 0.5, max: 8.0, step: 0.1 },
       { id: "soakStrength", label: "Soak Strength", uniform: "uSoakStrength", type: "float", value: 0.5, min: 0.0, max: 2.0, step: 0.02 },
