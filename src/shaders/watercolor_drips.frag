@@ -103,6 +103,25 @@ float polarFbm(float theta, float radial, float angScale, float radScale, vec2 s
   return fbm(vec2(cos(theta), sin(theta)) * r + vec2(radial * radScale, 0.0) + seed);
 }
 
+// Coverage for a growing arc on the unit circle [0,1). Soft falloff uses
+// circular distance to the painted set so the brush head and origin never
+// leave a hard radial cut. When arcLen reaches 1 the whole loop is covered.
+float loopArcReveal(float thetaNorm, float arcLen, float soft) {
+  float len = clamp(arcLen, 0.0, 1.0);
+  float edge = max(soft, EPSILON);
+  float t = fract(thetaNorm);
+
+  // Exterior gap is the open arc (len, 1). Distance to the painted arc is the
+  // distance to the nearer endpoint along the circle (0 when inside the arc).
+  float inGap = step(len, t);
+  float distOut = inGap * min(t - len, 1.0 - t);
+
+  // Force a fully closed ring once travel finishes; avoid tiny residual gaps.
+  float closed = step(1.0 - EPSILON, len);
+  float openReveal = 1.0 - smoothstep(0.0, edge, distOut);
+  return mix(openReveal, 1.0, closed);
+}
+
 vec3 hsv2rgb(vec3 c) {
   vec3 p = abs(fract(c.xxx + vec3(0.0, 0.6666667, 0.3333333)) * 6.0 - 3.0);
   return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
@@ -200,29 +219,29 @@ void main() {
     float radius = baseR * loopRadius(theta, fi, time);
     float signedDist = dist - radius;
 
-    // Progressive painting: each stroke is drawn around its loop over a
-    // cycle, lingers, then washes out before being repainted.
-    // thetaNorm is shifted per-loop so start angles differ; paintExtent is
-    // stretched by `soft` so that when travel reaches 1 the soft front has
-    // fully wrapped and the ring closes with no residual radial gap.
+    // Progressive painting: each stroke grows as a circular arc around its
+    // loop, lingers as a fully closed ring, then washes out before repaint.
+    // Start angle is hashed per loop; coverage uses circular distance so the
+    // origin and the brush head never introduce a radial seam.
     float cycle = mix(uCycleMin, uCycleMax, hash11(fi * 2.71));
     float phase = fract(time / max(cycle, EPSILON) + hash11(fi * 41.3));
     float paintOn = smoothstep(0.0, 0.06, phase) * (1.0 - smoothstep(0.86, 0.99, phase));
     float travel = smoothstep(0.02, 0.62, phase);
     float thetaNorm = fract(theta / TAU + hash11(fi * 47.9));
     float soft = max(uDrawSoftness, EPSILON);
-    float paintExtent = travel * (1.0 + soft);
-    float reveal = 1.0 - smoothstep(paintExtent - soft, paintExtent, thetaNorm);
+    float reveal = loopArcReveal(thetaNorm, travel, soft);
 
     float width = baseR * mix(uStrokeWidthMin, uStrokeWidthMax, hash11(fi * 31.7));
     width *= 1.0 + uWidthMod * sin(theta * 3.0 + hash11(fi * 53.3) * TAU + time * uMorphSpeed * 0.4);
     width = max(width, EPSILON);
 
     // Angle must enter noise via cos/sin so ink/bleed are seamless on the loop.
+    // Use the same per-loop angle origin as reveal so texture lines up with paint.
+    float thetaStroke = thetaNorm * TAU;
     float ink = mix(
       1.0 - uInkTexture,
       1.0,
-      polarFbm(theta, signedDist, 6.0, 18.0, vec2(fi * 0.7, fi * 1.3))
+      polarFbm(thetaStroke, signedDist, 6.0, 18.0, vec2(fi * 0.7, fi * 1.3))
     );
     float strokeCore = smoothstep(width * 1.5, width * 0.35, abs(signedDist));
     float strokeMask = strokeCore * reveal * paintOn * ink;
@@ -230,7 +249,7 @@ void main() {
     float bleedSpread = max(width * uBleedSpread, EPSILON);
     float bleed =
       exp(-pow(signedDist / bleedSpread, 2.0)) *
-      (0.45 + 0.55 * polarFbm(theta, dist, 2.2 * TAU, 9.0, vec2(fi * 0.7, 3.1))) *
+      (0.45 + 0.55 * polarFbm(thetaStroke, dist, 2.2 * TAU, 9.0, vec2(fi * 0.7, 3.1))) *
       reveal * paintOn * uBleedStrength;
 
     float soak =
