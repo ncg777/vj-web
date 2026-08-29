@@ -8,6 +8,7 @@ import diffEdgeFlowFrag from "./shaders/diffusion_edge_flow.frag?raw";
 import diffThresholdFrag from "./shaders/diffusion_threshold_feedback.frag?raw";
 import prismFrag from "./shaders/prismatic_fold_raymarch.frag?raw";
 import seascapeFrag from "./shaders/seascape_tdm.frag?raw";
+import acidscapeFrag from "./shaders/acidscape.frag?raw";
 import tileableWaterPlusFrag from "./shaders/tileable_water_plus.frag?raw";
 import sunsetPlusFrag from "./shaders/sunset_plus.frag?raw";
 import sunsetOrbitFrag from "./shaders/sunset_orbit.frag?raw";
@@ -26,6 +27,7 @@ import plasmaCrystalReactorFrag from "./shaders/plasma_crystal_reactor.frag?raw"
 import plasmaFerrofluidOracleFrag from "./shaders/plasma_ferrofluid_oracle.frag?raw";
 import plasmaSignalCathedralFrag from "./shaders/plasma_signal_cathedral.frag?raw";
 import plasmicDeepSeaMedusasFrag from "./shaders/plasmic_deep_sea_medusas.frag?raw";
+import plasmaOilDiffractionFrag from "./shaders/plasma_oil_diffraction.frag?raw";
 
 export type KeyBinding = {
   inc: string;
@@ -1134,6 +1136,40 @@ export const animations: AnimationConfig[] = [
     ],
   },
   {
+    id: "acidscape",
+    name: "Acidscape",
+    description:
+      "A raymarched ocean skinned with flowing oil diffraction, spectral wave crests, and racing plasma veins.",
+    fragment: acidscapeFrag,
+    resolutionUniform: "uResolution",
+    timeUniform: "uTime",
+    timeMode: "seconds",
+    params: [
+      { id: "timeScale", label: "Time Scale", uniform: "uTimeScale", type: "float", value: 0.3, min: 0.0, max: 1.5, step: 0.01, key: { inc: "1", dec: "2", step: 0.02, shiftStep: 0.1 } },
+      { id: "seaHeight", label: "Sea Height", uniform: "uSeaHeight", type: "float", value: 0.6, min: 0.1, max: 1.5, step: 0.02, key: { inc: "3", dec: "4", step: 0.05, shiftStep: 0.2 } },
+      { id: "seaChoppy", label: "Sea Choppy", uniform: "uSeaChoppy", type: "float", value: 4.0, min: 1.0, max: 7.0, step: 0.1, key: { inc: "5", dec: "6", step: 0.1, shiftStep: 0.4 } },
+      { id: "seaFreq", label: "Sea Frequency", uniform: "uSeaFreq", type: "float", value: 0.16, min: 0.05, max: 0.4, step: 0.005, key: { inc: "7", dec: "8", step: 0.01, shiftStep: 0.04 } },
+      { id: "seaSpeed", label: "Sea Speed", uniform: "uSeaSpeed", type: "float", value: 0.8, min: 0.0, max: 2.0, step: 0.05, key: { inc: "q", dec: "a", step: 0.05, shiftStep: 0.2 } },
+      { id: "camHeight", label: "Camera Height", uniform: "uCamHeight", type: "float", value: 3.5, min: 1.0, max: 8.0, step: 0.1, key: { inc: "w", dec: "s", step: 0.1, shiftStep: 0.5 } },
+      { id: "camDistance", label: "Camera Distance", uniform: "uCamDistance", type: "float", value: 5.0, min: 1.0, max: 10.0, step: 0.1, key: { inc: "e", dec: "d", step: 0.1, shiftStep: 0.5 } },
+      { id: "camYaw", label: "Camera Yaw", uniform: "uCamYaw", type: "float", value: 0.0, min: -1.0, max: 1.0, step: 0.02, key: { inc: "r", dec: "f", step: 0.02, shiftStep: 0.08 } },
+      { id: "camPitch", label: "Camera Pitch", uniform: "uCamPitch", type: "float", value: 0.0, min: -0.5, max: 0.5, step: 0.02, key: { inc: "t", dec: "g", step: 0.02, shiftStep: 0.08 } },
+      { id: "skyBoost", label: "Sky Boost", uniform: "uSkyBoost", type: "float", value: 1.0, min: 0.4, max: 1.8, step: 0.02, key: { inc: "y", dec: "h", step: 0.02, shiftStep: 0.08 } },
+      { id: "waterBrightness", label: "Film Brightness", uniform: "uWaterBrightness", type: "float", value: 0.75, min: 0.1, max: 1.8, step: 0.02, key: { inc: "u", dec: "j", step: 0.03, shiftStep: 0.1 } },
+      { id: "filmThickness", label: "Film Thickness", uniform: "uFilmThickness", type: "float", value: 1.0, min: 0.15, max: 3.5, step: 0.02, key: { inc: "i", dec: "k", step: 0.05, shiftStep: 0.2 } },
+      { id: "diffraction", label: "Diffraction Bands", uniform: "uDiffraction", type: "float", value: 1.35, min: 0.2, max: 5.0, step: 0.03, key: { inc: "o", dec: "l", step: 0.08, shiftStep: 0.3 } },
+      { id: "oilScale", label: "Oil Scale", uniform: "uOilScale", type: "float", value: 0.35, min: 0.05, max: 1.5, step: 0.01, key: { inc: "p", dec: ";", step: 0.03, shiftStep: 0.1 } },
+      { id: "oilWarp", label: "Oil Warp", uniform: "uOilWarp", type: "float", value: 1.0, min: 0.0, max: 3.0, step: 0.02 },
+      { id: "plasmaDensity", label: "Plasma Density", uniform: "uPlasmaDensity", type: "float", value: 1.0, min: 0.2, max: 4.0, step: 0.03 },
+      { id: "dischargeSpeed", label: "Discharge Speed", uniform: "uDischargeSpeed", type: "float", value: 1.0, min: -4.0, max: 4.0, step: 0.03 },
+      { id: "spectralContrast", label: "Spectral Contrast", uniform: "uSpectralContrast", type: "float", value: 1.1, min: 0.2, max: 3.0, step: 0.02 },
+      { id: "plasmaGlow", label: "Plasma Glow", uniform: "uPlasmaGlow", type: "float", value: 1.2, min: 0.2, max: 3.0, step: 0.02 },
+      { id: "acidSky", label: "Acid Sky", uniform: "uAcidSky", type: "float", value: 0.35, min: 0.0, max: 1.0, step: 0.01 },
+      { id: "hueShift", label: "Spectral Shift", uniform: "uHueShift", type: "float", value: 0.0, min: -1.0, max: 1.0, step: 0.01 },
+      { id: "seed", label: "Seed", uniform: "uSeed", type: "seed", value: 0 },
+    ],
+  },
+  {
     id: "sunset-plus",
     name: "Sunset Plus",
     description: "Volumetric sunset clouds with tunable turbulence and hue drift.",
@@ -2016,6 +2052,30 @@ export const animations: AnimationConfig[] = [
       { id: "glow", label: "Bioluminescence", uniform: "uGlow", type: "float", value: 1.2, min: 0.2, max: 3.0, step: 0.02, key: { inc: "i", dec: "k", step: 0.05, shiftStep: 0.2 } },
       { id: "marineSnow", label: "Marine Snow", uniform: "uMarineSnow", type: "float", value: 0.75, min: 0.0, max: 2.5, step: 0.02, key: { inc: "o", dec: "l", step: 0.05, shiftStep: 0.2 } },
       { id: "hue", label: "Abyssal Hue", uniform: "uHue", type: "float", value: 0.0, min: -1.0, max: 1.0, step: 0.01, key: { inc: "p", dec: ";", step: 0.03, shiftStep: 0.1 } },
+      { id: "seed", label: "Seed", uniform: "uSeed", type: "seed", value: 0 },
+    ],
+  },
+  {
+    id: "plasma-oil-diffraction",
+    name: "Plasma Oil Diffraction",
+    description:
+      "Charged filaments ignite along flowing oil membranes while thin-film diffraction splits every ripple into spectral bands.",
+    fragment: plasmaOilDiffractionFrag,
+    resolutionUniform: "uResolution",
+    timeUniform: "uTime",
+    timeMode: "seconds",
+    params: [
+      { id: "timeScale", label: "Time Scale", uniform: "uTimeScale", type: "float", value: 1.0, min: 0.0, max: 3.0, step: 0.02, key: { inc: "1", dec: "2", step: 0.05, shiftStep: 0.2 } },
+      { id: "zoom", label: "Zoom", uniform: "uZoom", type: "float", value: 1.0, min: 0.35, max: 2.5, step: 0.02, key: { inc: "3", dec: "4", step: 0.05, shiftStep: 0.2 } },
+      { id: "filmThickness", label: "Film Thickness", uniform: "uFilmThickness", type: "float", value: 1.0, min: 0.15, max: 3.5, step: 0.02, key: { inc: "5", dec: "6", step: 0.05, shiftStep: 0.2 } },
+      { id: "diffraction", label: "Diffraction Bands", uniform: "uDiffraction", type: "float", value: 1.35, min: 0.2, max: 5.0, step: 0.03, key: { inc: "7", dec: "8", step: 0.08, shiftStep: 0.3 } },
+      { id: "fluidWarp", label: "Fluid Warp", uniform: "uFluidWarp", type: "float", value: 1.0, min: 0.0, max: 3.0, step: 0.02, key: { inc: "q", dec: "a", step: 0.05, shiftStep: 0.2 } },
+      { id: "dropletScale", label: "Droplet Scale", uniform: "uDropletScale", type: "float", value: 3.8, min: 1.0, max: 10.0, step: 0.1, key: { inc: "w", dec: "s", step: 0.2, shiftStep: 0.8 } },
+      { id: "plasmaDensity", label: "Plasma Density", uniform: "uPlasmaDensity", type: "float", value: 1.0, min: 0.2, max: 4.0, step: 0.03, key: { inc: "e", dec: "d", step: 0.08, shiftStep: 0.3 } },
+      { id: "dischargeSpeed", label: "Discharge Speed", uniform: "uDischargeSpeed", type: "float", value: 1.0, min: -4.0, max: 4.0, step: 0.03, key: { inc: "r", dec: "f", step: 0.08, shiftStep: 0.3 } },
+      { id: "spectralContrast", label: "Spectral Contrast", uniform: "uSpectralContrast", type: "float", value: 1.15, min: 0.2, max: 3.0, step: 0.02, key: { inc: "t", dec: "g", step: 0.05, shiftStep: 0.2 } },
+      { id: "glow", label: "Plasma Glow", uniform: "uGlow", type: "float", value: 1.2, min: 0.2, max: 3.0, step: 0.02, key: { inc: "y", dec: "h", step: 0.05, shiftStep: 0.2 } },
+      { id: "hueShift", label: "Spectral Shift", uniform: "uHueShift", type: "float", value: 0.0, min: -1.0, max: 1.0, step: 0.01, key: { inc: "u", dec: "j", step: 0.03, shiftStep: 0.1 } },
       { id: "seed", label: "Seed", uniform: "uSeed", type: "seed", value: 0 },
     ],
   },
