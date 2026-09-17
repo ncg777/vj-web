@@ -1,3 +1,5 @@
+import { fluidAnimations } from "./fluid-animations";
+import { smokeAnimations } from "./smoke-animations";
 import neonFrag from "./shaders/neon_isoclines.frag?raw";
 import tanhFrag from "./shaders/terrain_tanh_isoclines.frag?raw";
 import tunnelFrag from "./shaders/brownian_loop_tunnel.frag?raw";
@@ -70,6 +72,8 @@ export type AnimationConfig = {
 };
 
 export const animations: AnimationConfig[] = [
+  ...smokeAnimations,
+  ...fluidAnimations,
   {
     id: "neon",
     name: "Neon Isoclines",
