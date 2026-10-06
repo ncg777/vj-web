@@ -16,6 +16,15 @@ npm run build
 npm run preview
 ```
 
+## Reverie Seascape
+
+Reverie Seascape combines the Seascape/Acidscape wave surface with Fractal
+Reverie's drifting color fields on the water and Plasma Oil Diffraction across
+the sky. The sky reflects in the wave faces, with haze blending the distant
+water into the horizon. Water and sky have separate scale, speed, hue, and
+brightness controls; `Sky Reflection` adjusts the reflected sky on the water.
+`Time Scale` controls the whole scene, and `Reseed` changes all procedural fields.
+
 ## Thunderstorm
 
 The lightning uses a procedural stepped-leader model with multiscale jagged

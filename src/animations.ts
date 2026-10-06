@@ -11,6 +11,7 @@ import diffThresholdFrag from "./shaders/diffusion_threshold_feedback.frag?raw";
 import prismFrag from "./shaders/prismatic_fold_raymarch.frag?raw";
 import seascapeFrag from "./shaders/seascape_tdm.frag?raw";
 import acidscapeFrag from "./shaders/acidscape.frag?raw";
+import reverieSeascapeFrag from "./shaders/reverie_seascape.frag?raw";
 import tileableWaterPlusFrag from "./shaders/tileable_water_plus.frag?raw";
 import sunsetPlusFrag from "./shaders/sunset_plus.frag?raw";
 import sunsetOrbitFrag from "./shaders/sunset_orbit.frag?raw";
@@ -1170,6 +1171,55 @@ export const animations: AnimationConfig[] = [
       { id: "plasmaGlow", label: "Plasma Glow", uniform: "uPlasmaGlow", type: "float", value: 1.2, min: 0.2, max: 3.0, step: 0.02 },
       { id: "acidSky", label: "Acid Sky", uniform: "uAcidSky", type: "float", value: 0.35, min: 0.0, max: 1.0, step: 0.01 },
       { id: "hueShift", label: "Spectral Shift", uniform: "uHueShift", type: "float", value: 0.0, min: -1.0, max: 1.0, step: 0.01 },
+      { id: "seed", label: "Seed", uniform: "uSeed", type: "seed", value: 0 },
+    ],
+  },
+  {
+    id: "reverie-seascape",
+    name: "Reverie Seascape",
+    description:
+      "Fractal Reverie's drifting color fields flow over a raymarched ocean beneath a reflected Plasma Oil Diffraction sky.",
+    fragment: reverieSeascapeFrag,
+    resolutionUniform: "uResolution",
+    timeUniform: "uTime",
+    timeMode: "seconds",
+    params: [
+      { id: "timeScale", label: "Time Scale", uniform: "uTimeScale", type: "float", value: 0.3, min: 0.0, max: 1.5, step: 0.01, key: { inc: "1", dec: "2", step: 0.02, shiftStep: 0.1 } },
+      { id: "seaHeight", label: "Sea Height", uniform: "uSeaHeight", type: "float", value: 0.6, min: 0.1, max: 1.5, step: 0.02, key: { inc: "3", dec: "4", step: 0.05, shiftStep: 0.2 } },
+      { id: "seaChoppy", label: "Sea Choppy", uniform: "uSeaChoppy", type: "float", value: 4.0, min: 1.0, max: 7.0, step: 0.1, key: { inc: "5", dec: "6", step: 0.1, shiftStep: 0.4 } },
+      { id: "seaFreq", label: "Sea Frequency", uniform: "uSeaFreq", type: "float", value: 0.16, min: 0.05, max: 0.4, step: 0.005, key: { inc: "7", dec: "8", step: 0.01, shiftStep: 0.04 } },
+      { id: "seaSpeed", label: "Sea Speed", uniform: "uSeaSpeed", type: "float", value: 0.8, min: 0.0, max: 2.0, step: 0.05, key: { inc: "q", dec: "a", step: 0.05, shiftStep: 0.2 } },
+      { id: "camHeight", label: "Camera Height", uniform: "uCamHeight", type: "float", value: 3.5, min: 1.0, max: 8.0, step: 0.1, key: { inc: "w", dec: "s", step: 0.1, shiftStep: 0.5 } },
+      { id: "camDistance", label: "Camera Travel", uniform: "uCamDistance", type: "float", value: 1.2, min: 0.0, max: 10.0, step: 0.1, key: { inc: "e", dec: "d", step: 0.1, shiftStep: 0.5 } },
+      { id: "camYaw", label: "Camera Yaw", uniform: "uCamYaw", type: "float", value: 0.0, min: -3.14, max: 3.14, step: 0.02, key: { inc: "r", dec: "f", step: 0.02, shiftStep: 0.08 } },
+      { id: "camPitch", label: "Camera Pitch", uniform: "uCamPitch", type: "float", value: 0.08, min: -0.5, max: 0.5, step: 0.02, key: { inc: "t", dec: "g", step: 0.02, shiftStep: 0.08 } },
+      { id: "waterScale", label: "Water Fractal Scale", uniform: "uWaterScale", type: "float", value: 0.16, min: 0.02, max: 0.8, step: 0.005, key: { inc: "y", dec: "h", step: 0.01, shiftStep: 0.05 } },
+      { id: "waterSpeed", label: "Water Reverie Speed", uniform: "uWaterSpeed", type: "float", value: 0.16, min: 0.0, max: 3.0, step: 0.01 },
+      { id: "fractalIters", label: "Water Fractal Iters", uniform: "uFractalIters", type: "int", value: 2, min: 1, max: 5, step: 1 },
+      { id: "foldScale", label: "Water Fold Scale", uniform: "uFoldScale", type: "float", value: 1.18, min: 1.0, max: 4.0, step: 0.01 },
+      { id: "foldOffset", label: "Water Fold Offset", uniform: "uFoldOffset", type: "float", value: 0.42, min: 0.0, max: 3.0, step: 0.01 },
+      { id: "rotSpeed", label: "Water Warp Speed", uniform: "uRotSpeed", type: "float", value: 0.03, min: 0.0, max: 3.0, step: 0.01 },
+      { id: "detailLevel", label: "Water Detail", uniform: "uDetailLevel", type: "float", value: 1.0, min: 0.2, max: 5.0, step: 0.1 },
+      { id: "smoothBlend", label: "Water Smooth Blend", uniform: "uSmoothBlend", type: "float", value: 0.9, min: 0.0, max: 1.0, step: 0.01 },
+      { id: "waterBrightness", label: "Water Brightness", uniform: "uWaterBrightness", type: "float", value: 1.8, min: 0.1, max: 4.0, step: 0.05, key: { inc: "u", dec: "j", step: 0.05, shiftStep: 0.2 } },
+      { id: "saturation", label: "Water Saturation", uniform: "uSaturation", type: "float", value: 2.0, min: 0.0, max: 3.0, step: 0.01 },
+      { id: "waterContrast", label: "Water Contrast", uniform: "uWaterContrast", type: "float", value: 1.1, min: 0.5, max: 3.0, step: 0.01 },
+      { id: "waterGlow", label: "Water Glow", uniform: "uWaterGlow", type: "float", value: 4.5, min: 0.0, max: 8.0, step: 0.1 },
+      { id: "waterHue", label: "Water Hue", uniform: "uWaterHue", type: "float", value: 0.0, min: -1.0, max: 1.0, step: 0.01 },
+      { id: "hueSpeed", label: "Water Hue Drift", uniform: "uHueSpeed", type: "float", value: 0.05, min: 0.0, max: 1.0, step: 0.005 },
+      { id: "reflection", label: "Sky Reflection", uniform: "uReflection", type: "float", value: 0.45, min: 0.0, max: 1.0, step: 0.01 },
+      { id: "skyScale", label: "Sky Oil Scale", uniform: "uSkyScale", type: "float", value: 1.0, min: 0.25, max: 3.0, step: 0.02 },
+      { id: "skySpeed", label: "Sky Flow Speed", uniform: "uSkySpeed", type: "float", value: 1.0, min: 0.0, max: 3.0, step: 0.02 },
+      { id: "skyBoost", label: "Sky Brightness", uniform: "uSkyBoost", type: "float", value: 1.0, min: 0.0, max: 1.8, step: 0.02, key: { inc: "i", dec: "k", step: 0.05, shiftStep: 0.2 } },
+      { id: "filmThickness", label: "Sky Film Thickness", uniform: "uFilmThickness", type: "float", value: 1.0, min: 0.15, max: 3.5, step: 0.02 },
+      { id: "diffraction", label: "Sky Diffraction Bands", uniform: "uDiffraction", type: "float", value: 1.35, min: 0.2, max: 5.0, step: 0.03, key: { inc: "o", dec: "l", step: 0.08, shiftStep: 0.3 } },
+      { id: "fluidWarp", label: "Sky Fluid Warp", uniform: "uFluidWarp", type: "float", value: 1.0, min: 0.0, max: 3.0, step: 0.02 },
+      { id: "dropletScale", label: "Sky Droplet Scale", uniform: "uDropletScale", type: "float", value: 3.8, min: 1.0, max: 10.0, step: 0.1 },
+      { id: "plasmaDensity", label: "Sky Plasma Density", uniform: "uPlasmaDensity", type: "float", value: 1.0, min: 0.2, max: 4.0, step: 0.03 },
+      { id: "dischargeSpeed", label: "Sky Discharge Speed", uniform: "uDischargeSpeed", type: "float", value: 1.0, min: -4.0, max: 4.0, step: 0.03 },
+      { id: "spectralContrast", label: "Sky Spectral Contrast", uniform: "uSpectralContrast", type: "float", value: 1.15, min: 0.2, max: 3.0, step: 0.02 },
+      { id: "plasmaGlow", label: "Sky Plasma Glow", uniform: "uPlasmaGlow", type: "float", value: 1.2, min: 0.0, max: 3.0, step: 0.02 },
+      { id: "skyHue", label: "Sky Spectral Shift", uniform: "uSkyHue", type: "float", value: 0.0, min: -1.0, max: 1.0, step: 0.01, key: { inc: "p", dec: ";", step: 0.03, shiftStep: 0.1 } },
       { id: "seed", label: "Seed", uniform: "uSeed", type: "seed", value: 0 },
     ],
   },
