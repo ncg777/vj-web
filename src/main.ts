@@ -8,7 +8,9 @@ import {
   resizeCanvasToDisplaySize,
   type UniformLocations,
 } from "./gl";
-import { Muxer, FileSystemWritableFileStreamTarget } from "mp4-muxer";
+import { renderVideo, type VideoSink } from "./video-export";
+import { connectMcp } from "./mcp-client";
+import { findScene, validateParameters, type VideoOptions } from "./control";
 
 type ProgramInfo = {
   program: WebGLProgram;
@@ -183,6 +185,7 @@ let activeControls: Record<
   { range?: HTMLInputElement; number?: HTMLInputElement }
 > = {};
 let startTime = performance.now();
+let animationFrame = 0;
 let hudTimeout: number | null = null;
 let sidebarTimeout: number | null = null;
 
@@ -606,6 +609,7 @@ function setActiveAnimation(id: string) {
 }
 
 function handleKey(event: KeyboardEvent) {
+  if (isOfflineRendering) return;
   if (isTypingTarget(event.target)) {
     return;
   }
@@ -786,217 +790,154 @@ function renderFrame(now: number) {
   const elapsed = (now - startTime) / 1000;
   const { width, height } = resizeCanvasToDisplaySize(canvas);
   renderSingleFrame(activeAnimation, elapsed, width, height);
-  requestAnimationFrame(renderFrame);
+  animationFrame = requestAnimationFrame(renderFrame);
 }
 
 // ── Offline render engine (WebCodecs + mp4-muxer) ───────────
 
-/** Yield one animation frame — keeps the browser from thinking the page is hung. */
-function yieldFrame(): Promise<void> {
-  return new Promise((r) => requestAnimationFrame(() => r()));
+async function runOfflineRender(
+  options: VideoOptions,
+  sink: VideoSink,
+  signal?: AbortSignal,
+  onProgress?: (completed: number, total: number) => void,
+) {
+  if (isOfflineRendering || isRecording) {
+    await sink.abort();
+    throw new Error("Stop the current recording or export before exporting video.");
+  }
+  if (gl.isContextLost()) {
+    await sink.abort();
+    throw new Error("WebGL context is lost. Reload the browser tab.");
+  }
+  const animation = activeAnimation;
+  if (animation.stateful && !supportsFloatTargets) {
+    await sink.abort();
+    throw new Error("This scene requires floating-point WebGL render targets.");
+  }
+  isOfflineRendering = true;
+  cancelAnimationFrame(animationFrame);
+  const panel = document.querySelector<HTMLElement>(".panel")!;
+  panel.inert = true;
+  const previous = { width: canvas.width, height: canvas.height, styleW: canvas.style.width, styleH: canvas.style.height };
+  const progressWrap = document.getElementById("offline-progress");
+  const bar = document.getElementById("offline-bar");
+  const status = document.getElementById("offline-status");
+  progressWrap?.classList.remove("hidden");
+  status?.classList.remove("hidden");
+  try {
+    canvas.width = options.width;
+    canvas.height = options.height;
+    canvas.style.width = options.width + "px";
+    canvas.style.height = options.height + "px";
+    markStateNeedsInit(animation.id);
+    await renderVideo({
+      ...options, canvas, sink, signal,
+      render(time, width, height) {
+        renderSingleFrame(animation, time, width, height);
+        gl.finish();
+      },
+      progress(completed, total) {
+        if (bar) bar.style.width = (completed / total * 100) + "%";
+        if (status) status.textContent = "Rendering frame " + completed + "/" + total;
+        if (completed % options.fps === 0 || completed === total) onProgress?.(completed, total);
+      },
+    });
+    if (status) status.textContent = "Video saved.";
+  } catch (error) {
+    if (status) status.textContent = signal?.aborted ? "Export cancelled." : "Export failed: " + (error instanceof Error ? error.message : String(error));
+    throw error;
+  } finally {
+    canvas.width = previous.width;
+    canvas.height = previous.height;
+    canvas.style.width = previous.styleW;
+    canvas.style.height = previous.styleH;
+    markStateNeedsInit(animation.id);
+    panel.inert = false;
+    isOfflineRendering = false;
+    startTime = performance.now();
+    animationFrame = requestAnimationFrame(renderFrame);
+  }
 }
 
-async function offlineRender(
-  animation: AnimationConfig,
-  durationSec: number,
-  fps: number,
-  targetWidth: number,
-  targetHeight: number,
-) {
-  // Check WebCodecs availability
-  if (typeof VideoEncoder === "undefined" || typeof VideoFrame === "undefined") {
-    alert(
-      "Offline rendering requires the WebCodecs API (Chrome/Edge 94+, Safari 16.4+).",
-    );
-    return;
-  }
-
-  // Check H.264 support
-  const encoderConfig: VideoEncoderConfig = {
-    codec: "avc1.640028", // H.264 High Profile Level 4.0
-    width: targetWidth,
-    height: targetHeight,
-    bitrate: 16_000_000,
-    framerate: fps,
-  };
-  const support = await VideoEncoder.isConfigSupported(encoderConfig);
-  if (!support.supported) {
-    alert("H.264 video encoding is not supported on this device.");
-    return;
-  }
-
-  // Prompt user for save location — streams directly to disk, no memory pressure
+async function offlineRender(animation: AnimationConfig, duration: number, fps: number, width: number, height: number) {
   let fileHandle: FileSystemFileHandle;
   try {
     fileHandle = await window.showSaveFilePicker({
-      suggestedName: `${animation.id}-${targetWidth}x${targetHeight}-${fps}fps-${durationSec}s.mp4`,
-      types: [
-        {
-          description: "MP4 Video",
-          accept: { "video/mp4": [".mp4"] },
-        },
-      ],
+      suggestedName: animation.id + "-" + width + "x" + height + "-" + fps + "fps-" + duration + "s.mp4",
+      types: [{ description: "MP4 Video", accept: { "video/mp4": [".mp4"] } }],
     });
-  } catch {
-    // User cancelled the save dialog
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === "AbortError")) {
+      alert(error instanceof Error ? error.message : String(error));
+    }
     return;
   }
-
-  const writableStream = await fileHandle.createWritable();
-
-  // UI handles
-  const btn = document.getElementById("offline-btn") as HTMLButtonElement | null;
-  const progressWrap = document.getElementById("offline-progress");
-  const bar = document.getElementById("offline-bar");
-  const statusEl = document.getElementById("offline-status");
-  if (btn) btn.disabled = true;
-  progressWrap?.classList.remove("hidden");
-  statusEl?.classList.remove("hidden");
-
-  // Pause live loop
-  isOfflineRendering = true;
-
-  // Reset stateful resources so the offline render starts clean
-  if (animation.stateful) {
-    getStateResources(animation);
-    markStateNeedsInit(animation.id);
-  }
-
-  // Resize canvas to target output size
-  const prevWidth = canvas.width;
-  const prevHeight = canvas.height;
-  const prevStyleW = canvas.style.width;
-  const prevStyleH = canvas.style.height;
-  canvas.width = targetWidth;
-  canvas.height = targetHeight;
-  canvas.style.width = `${targetWidth}px`;
-  canvas.style.height = `${targetHeight}px`;
-
-  // Set up mp4-muxer — stream to disk via File System Access API
-  const muxTarget = new FileSystemWritableFileStreamTarget(writableStream);
-  const muxer = new Muxer({
-    target: muxTarget,
-    video: {
-      codec: "avc",
-      width: targetWidth,
-      height: targetHeight,
-    },
-    fastStart: false, // streaming mode — no need to buffer everything in RAM
-  });
-
-  // Set up VideoEncoder
-  let encoderError: Error | null = null;
-  const encoder = new VideoEncoder({
-    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta ?? undefined),
-    error: (e) => {
-      encoderError = e;
-    },
-  });
-  encoder.configure(encoderConfig);
-
-  const totalFrames = Math.ceil(durationSec * fps);
-  const frameDurationUs = Math.round(1_000_000 / fps);
-  const KEYFRAME_INTERVAL = fps * 2; // keyframe every 2 seconds
-  const FLUSH_INTERVAL = fps * 30;   // flush encoder every 30 seconds of video
-  const t0 = performance.now();
-
-  // Handle context loss during render — attempt to save partial output
-  let contextLost = false;
-  const onContextLost = (e: Event) => {
-    e.preventDefault(); // allow restoration later
-    contextLost = true;
-  };
-  canvas.addEventListener("webglcontextlost", onContextLost);
-
-  for (let frame = 0; frame < totalFrames; frame++) {
-    if (encoderError || contextLost) break;
-
-    const timeSeconds = frame / fps;
-    renderSingleFrame(animation, timeSeconds, targetWidth, targetHeight);
-    gl.finish(); // ensure GPU is done before capturing
-
-    const videoFrame = new VideoFrame(canvas, {
-      timestamp: frame * frameDurationUs,
-      duration: frameDurationUs,
-    });
-    encoder.encode(videoFrame, {
-      keyFrame: frame % KEYFRAME_INTERVAL === 0,
-    });
-    videoFrame.close();
-
-    // Periodically flush the encoder to reduce memory pressure
-    if (frame > 0 && frame % FLUSH_INTERVAL === 0) {
-      await encoder.flush();
-    }
-
-    // Update progress
-    const pct = ((frame + 1) / totalFrames) * 100;
-    if (bar) bar.style.width = `${pct}%`;
-    if (frame % 30 === 0) {
-      const elapsed = (performance.now() - t0) / 1000;
-      const remaining =
-        (elapsed / (frame + 1)) * (totalFrames - frame - 1);
-      if (statusEl) {
-        statusEl.textContent = `Frame ${frame + 1}/${totalFrames}  \u2014  ~${Math.ceil(remaining)}s left`;
-      }
-    }
-
-    // Yield every frame via rAF to prevent the browser from killing the context.
-    // Also applies backpressure if the encoder is falling behind.
-    if (encoder.encodeQueueSize > 10) {
-      await new Promise<void>((r) => setTimeout(r, 1));
-    }
-    await yieldFrame();
-  }
-
-  canvas.removeEventListener("webglcontextlost", onContextLost);
-
-  // Flush encoder, finalize MP4, and close the file stream
   try {
-    await encoder.flush();
-    encoder.close();
-    muxer.finalize();
-    await writableStream.close();
-  } catch (e) {
-    console.error("Finalization failed:", e);
-    try { await writableStream.close(); } catch { /* already closed */ }
+    const stream = await fileHandle.createWritable();
+    await runOfflineRender({ duration, fps, width, height }, {
+      write: (data, position) => stream.write({ type: "write", position, data: data.slice().buffer as ArrayBuffer }),
+      close: () => stream.close(),
+      abort: () => stream.abort(),
+    });
+  } catch (error) {
+    console.error("Video export failed:", error);
   }
+}
 
-  // Restore canvas
-  canvas.style.width = prevStyleW;
-  canvas.style.height = prevStyleH;
-  canvas.width = prevWidth;
-  canvas.height = prevHeight;
+function currentState() {
+  return {
+    sceneId: activeAnimation.id,
+    name: activeAnimation.name,
+    values: { ...stateByAnimation[activeAnimation.id] },
+    recording: isRecording,
+    exporting: isOfflineRendering,
+    capabilities: { floatTargets: supportsFloatTargets, webCodecs: typeof VideoEncoder !== "undefined", contextLost: gl.isContextLost() },
+  };
+}
 
-  // Reset stateful so live rendering resumes cleanly
-  if (animation.stateful) {
-    markStateNeedsInit(animation.id);
+let remoteExport: { jobId: string; controller: AbortController } | undefined;
+connectMcp(async ({ command, args }, connection) => {
+  if (command === "get_state") return currentState();
+  if (command === "cancel_export") {
+    if (remoteExport && remoteExport.jobId === args.jobId) remoteExport.controller.abort(new Error("Export cancelled."));
+    return currentState();
   }
-
-  // Resume live loop
-  isOfflineRendering = false;
-  startTime = performance.now();
-  requestAnimationFrame(renderFrame);
-
-  // Update UI
-  if (btn) btn.disabled = false;
-  const errorMessage = encoderError ? (encoderError as Error).message : null;
-  if (statusEl) {
-    if (contextLost) {
-      statusEl.textContent = `Context lost — partial video saved.`;
-    } else if (errorMessage) {
-      statusEl.textContent = `Error: ${errorMessage}`;
-    } else {
-      statusEl.textContent = "Done!";
+  if (isOfflineRendering) throw new Error("Wait for the video export to finish or cancel it before editing the scene.");
+  if (gl.isContextLost()) throw new Error("WebGL context is lost. Reload the browser tab.");
+  if (command === "export_video") {
+    const jobId = String(args.jobId);
+    const controller = new AbortController();
+    const disconnect = () => controller.abort(new Error("MCP disconnected during export."));
+    connection.signal.addEventListener("abort", disconnect, { once: true });
+    if (connection.signal.aborted) disconnect();
+    remoteExport = { jobId, controller };
+    try {
+      await runOfflineRender({ duration: Number(args.duration), fps: Number(args.fps), width: Number(args.width), height: Number(args.height) },
+        connection.sink(jobId), controller.signal,
+        (completed, total) => connection.progress(jobId, completed, total));
+      return currentState();
+    } finally {
+      connection.signal.removeEventListener("abort", disconnect);
+      remoteExport = undefined;
     }
   }
-  const hasIssue = contextLost || !!errorMessage;
-  setTimeout(() => {
-    progressWrap?.classList.add("hidden");
-    statusEl?.classList.add("hidden");
-    if (bar) bar.style.width = "0%";
-  }, hasIssue ? 8000 : 3000);
-}
+  const scene = findScene(animations, String(args.sceneId));
+  if (command === "select_scene") {
+    if (scene.stateful && !supportsFloatTargets) throw new Error("This scene requires floating-point WebGL render targets.");
+    setActiveAnimation(scene.id);
+  } else {
+    if (scene.id !== activeAnimation.id) throw new Error("The active scene changed. Read get_state before editing it.");
+    if (command === "set_parameters") {
+      const values = args.values as Record<string, number>;
+      validateParameters(scene, values);
+      for (const [id, value] of Object.entries(values)) setParamValue(scene.id, id, value);
+      if (scene.params.some((param) => param.type === "seed" && Object.prototype.hasOwnProperty.call(values, param.id))) markStateNeedsInit(scene.id);
+    } else if (command === "reset_scene") resetParams(scene.id);
+    else if (command === "reseed_scene") reseed(scene.id);
+    else throw new Error("Unknown browser command: " + command);
+  }
+  return currentState();
+});
 
 sidebarToggleButton.addEventListener("click", () => {
   document.body.classList.toggle("sidebar-collapsed");
@@ -1031,4 +972,4 @@ buildSceneList();
 setActiveAnimation(activeAnimation.id);
 updateSidebarToggleLabel();
 setSidebarToggleHidden(true);
-requestAnimationFrame(renderFrame);
+animationFrame = requestAnimationFrame(renderFrame);

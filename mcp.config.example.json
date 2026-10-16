@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "vj-web": {
+      "command": "node",
+      "args": ["D:/repos/vj-web/dist-mcp/server/index.js"]
+    }
+  }
+}

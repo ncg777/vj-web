@@ -21,25 +21,3 @@ interface SaveFilePickerOptions {
 interface Window {
   showSaveFilePicker(options?: SaveFilePickerOptions): Promise<FileSystemFileHandle>;
 }
-
-declare module "mp4-muxer" {
-  export class FileSystemWritableFileStreamTarget {
-    constructor(stream: FileSystemWritableFileStream);
-  }
-
-  export interface MuxerOptions {
-    target: FileSystemWritableFileStreamTarget;
-    video?: {
-      codec: string;
-      width: number;
-      height: number;
-    };
-    fastStart?: boolean | string;
-  }
-
-  export class Muxer {
-    constructor(options: MuxerOptions);
-    addVideoChunk(chunk: EncodedVideoChunk, meta?: EncodedVideoChunkMetadata): void;
-    finalize(): void;
-  }
-}

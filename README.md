@@ -16,6 +16,94 @@ npm run build
 npm run preview
 ```
 
+## MCP server and agent video export
+
+The local MCP server uses the official TypeScript SDK **2.3.1**, the latest stable
+release verified on October 16, 2026. It supports the **2026-07-28** protocol and
+older MCP clients through the SDK's compatibility support. See the
+[MCP v2 documentation](https://ts.sdk.modelcontextprotocol.io/v2/).
+
+Install with Node.js **20.19+**, then build the server and its browser app:
+
+```bash
+npm ci
+npm run build:mcp
+```
+
+Add the entry in [`mcp.config.example.json`](mcp.config.example.json) to your MCP
+client's configuration. Change the absolute path if your checkout is elsewhere.
+The client launches `node dist-mcp/server/index.js` directly. For a manual launch,
+use `npm run --silent mcp`; stdout is reserved for MCP messages and startup
+information goes to stderr. The server can start from any working directory.
+
+Ask the agent to call `get_connection`, then open its URL in Chrome or Edge.
+The page displays **MCP: connected**. Keep that tab open while controlling scenes
+or rendering video. One browser tab connects at a time; close it before connecting
+another. The URL contains a random connection token and changes on each server
+restart. The server binds only to `127.0.0.1` on an available port. Ordinary web
+visits without the connection token do not enable MCP control.
+
+| Tool | Purpose |
+| --- | --- |
+| `get_connection` | Browser URL, connection status, and export directory |
+| `list_scenes` | Browse or search the complete scene catalog |
+| `get_scene` | Parameter IDs, defaults, types, and limits |
+| `get_state` | Active scene, current parameters, and browser capabilities |
+| `select_scene` | Change the active scene |
+| `set_parameters` | Validate and apply a batch of parameters, including seeds |
+| `reset_scene` / `reseed_scene` | Reset controls or generate new procedural seeds |
+| `export_video` | Start an asynchronous H.264 MP4 render |
+| `get_export_status` | Check progress, completion, output path, or failure |
+| `cancel_export` | Stop an export and remove its incomplete file |
+
+The `vj-web://scenes` resource also exposes the catalog and control ranges.
+Catalog tools work without a browser; live tools require the connected tab.
+When editing, provide the active `sceneId` to avoid changing a scene the user has
+switched away from. Parameter updates are validated together, and changing a seed
+resets stateful simulations. Reset restores that browser session's defaults,
+including its original randomized seed.
+
+For example, an agent can select `reverie-seascape`, inspect its controls, adjust
+them, then call:
+
+```json
+{
+  "name": "export_video",
+  "arguments": { "duration": 10, "fps": 60, "width": 1920, "height": 1080 }
+}
+```
+
+The response contains a job `id`. Poll `get_export_status` with `{ "jobId": "…" }`
+until `status` is `completed`, then use the returned `path`. Videos are saved in
+`exports/` inside the checkout by default, with unique filenames. No browser save
+dialog is shown for agent exports. Data streams to disk as the clip renders;
+failed or cancelled jobs remove their `.part` files. Completed videos remain after
+the server stops; job status is held in memory for that server session.
+
+Exports capture the current scene settings, start at time zero, and contain no
+audio. Duration is 1–3600 seconds, FPS is 30 or 60, and even dimensions from 16×16
+through 3840×2160 are accepted. Defaults are 10 seconds at 1080p/60. Actual codec
+and resolution support depends on the browser and GPU. Stateful fluid/smoke scenes
+also require floating-point WebGL render targets. Scene controls are locked during
+an export; cancel through MCP to stop early. Closing the tab fails the export and
+removes its incomplete file. The existing **Generate** button retains its save
+dialog for manual exports.
+
+Optional environment variables on the MCP client entry:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `VJ_MCP_PORT` | `0` | Fixed loopback port, or `0` to choose an available port |
+| `VJ_EXPORT_DIR` | `<checkout>/exports` | Output directory; use an absolute path |
+
+Re-run `npm run build:mcp` after changing scenes or app code. This builds into
+`dist-mcp/` separately from the existing GitHub Pages build in `docs/`.
+
+Run the protocol/bridge checks with `npm run test:mcp`. Run the browser and video
+checks with `npm run test:browser`. Browser checks use installed Edge on Windows;
+elsewhere install Chromium with `npx playwright install chromium`. Set
+`VJ_BROWSER_CHANNEL=chrome` to use installed Chrome instead.
+
 ## Reverie Seascape
 
 Reverie Seascape combines the Seascape/Acidscape wave surface with Fractal
