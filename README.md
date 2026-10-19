@@ -80,13 +80,14 @@ dialog is shown for agent exports. Data streams to disk as the clip renders;
 failed or cancelled jobs remove their `.part` files. Completed videos remain after
 the server stops; job status is held in memory for that server session.
 
-Exports capture the current scene settings, start at time zero, and contain no
-audio. Duration is 1–3600 seconds, FPS is 30 or 60, and even dimensions from 16×16
+Exports capture the current scene and distortion settings and start at time zero.
+If a soundtrack is loaded and **Include soundtrack in video** is checked, it is
+included as AAC audio. Duration is 1–3600 seconds, FPS is 30 or 60, and even dimensions from 16×16
 through 3840×2160 are accepted. Defaults are 10 seconds at 1080p/60. Actual codec
 and resolution support depends on the browser and GPU. Stateful fluid/smoke scenes
 also require floating-point WebGL render targets. Scene controls are locked during
 an export; cancel through MCP to stop early. Closing the tab fails the export and
-removes its incomplete file. The existing **Generate** button retains its save
+removes its incomplete file. The **Export MP4** button retains its save
 dialog for manual exports.
 
 Optional environment variables on the MCP client entry:
@@ -103,6 +104,43 @@ Run the protocol/bridge checks with `npm run test:mcp`. Run the browser and vide
 checks with `npm run test:browser`. Browser checks use installed Edge on Windows;
 elsewhere install Chromium with `npx playwright install chromium`. Set
 `VJ_BROWSER_CHANNEL=chrome` to use installed Chrome instead.
+
+## Psychedelic distortion and optional soundtrack
+
+Enable **Psychedelic distortion** to process any scene through an independent
+visual layer. Scene parameters are not changed. Choose **Liquid warp** for flowing
+displacement and spectral ripples, **Spectral kaleidoscope** for twisting radial
+folds, or **Psychedelic feedback** for swirling trails and echoes. Adjust intensity,
+pattern scale, color separation, trail persistence (feedback mode), and audio
+sensitivity. Intensity zero bypasses the layer entirely. Distortion is off by default.
+
+Audio is optional: without a file, the effects animate on their own. Load a local
+audio file to drive their spatial patterns with its frequency spectrum. Files stay
+on your device. Use Play/Pause, the seek bar, Loop soundtrack, and preview volume
+to explore the track. Browser-decodable audio files up to one hour are supported.
+Playback time controls the animation while a track is loaded; removing it resumes
+free-running animation. Seeking and track loops restart fluid and feedback history
+rather than reconstructing earlier simulation states.
+
+To save a video with music:
+
+1. Load a soundtrack and enable the desired distortion.
+2. Leave **Include soundtrack in video** checked.
+3. Click **Use track length for export**, or choose a custom duration under **Export video**.
+4. Choose resolution and FPS, then click **Export MP4** and choose a save location.
+
+Export always starts at the beginning, regardless of preview position. The same
+precomputed spectrum timeline drives preview and offline frames. Short soundtracks
+repeat when Loop is enabled; otherwise the remaining video has silence. Preview
+volume does not alter the exported soundtrack. Uncheck Include soundtrack to
+export silent visuals while retaining audio-driven distortion. AAC soundtrack
+encoding requires browser support; an error explains how to export silently if
+it is unavailable. Live **Record** also includes the soundtrack when checked and
+starts playback from the current position if paused.
+
+`npm run test:audio` checks frequency analysis and timeline sampling. Browser tests
+also decode exported video and audio to check effects, soundtrack inclusion,
+looping, and silence after the track ends.
 
 ## Reverie Seascape
 

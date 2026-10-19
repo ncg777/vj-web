@@ -1,7 +1,7 @@
 {
   "name": "vj-web",
   "private": true,
-  "version": "2026.10.16",
+  "version": "2026.10.19",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,8 @@
     "build:mcp": "tsc -p tsconfig.json && tsc -p tsconfig.mcp.json && vite build --outDir dist-mcp/web && vite build --config vite.mcp.config.ts",
     "mcp": "node dist-mcp/server/index.js",
     "test:mcp": "npm run build:mcp && node --test tests/mcp.test.mjs",
-    "test:browser": "npm run build:mcp && node --test tests/browser.test.mjs"
+    "test:browser": "npm run build:mcp && node --test tests/browser.test.mjs",
+    "test:audio": "node --test tests/audio.test.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.3.1",

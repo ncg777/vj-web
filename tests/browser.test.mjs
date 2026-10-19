@@ -56,3 +56,117 @@ test("real browser controls scenes and exports a playable MP4 without a save dia
   assert.equal((await readdir(directory)).filter((name) => name.endsWith(".part")).length, 0);
   assert.deepEqual(errors, []);
 });
+
+test("optional distortion and audio soundtrack survive seek, looping and offline export", { timeout: 120_000 }, async (t) => {
+  const { call, connection } = await startServer(t);
+  const browser = await chromium.launch({
+    channel: process.env.VJ_BROWSER_CHANNEL || (process.platform === "win32" ? "msedge" : undefined),
+    headless: true, args: ["--enable-unsafe-swiftshader"],
+  });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 } });
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  page.on("console", msg => {
+    if (msg.type() === "error" && !msg.text().includes("Failed to load resource")) errors.push(msg.text());
+  });
+  await page.goto(connection.url);
+  await page.getByText("MCP: connected", { exact: true }).waitFor();
+  assert.equal(await page.locator("#distortion-enabled").isChecked(), false);
+  await call("select_scene", { sceneId: "neon" });
+  await call("set_parameters", { sceneId: "neon", values: { seed: 123 } });
+  await page.locator("#distortion-enabled").check();
+  const fingerprints = [];
+  for (const mode of ["0", "1", "2"]) {
+    await page.locator("#distortion-mode").selectOption(mode);
+    const job = await call("export_video", { duration: 1, fps: 30, width: 160, height: 90 });
+    const result = await waitForExport(call, job.id);
+    assert.equal(result.status, "completed", JSON.stringify(result));
+    const data = await readFile(result.path);
+    assert.equal(data.includes(Buffer.from("soun")), false);
+    const pixels = await page.evaluate(async base64 => {
+      const video = document.createElement("video");
+      const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(base64), c => c.charCodeAt(0))], { type: "video/mp4" }));
+      try {
+        video.src = url;
+        await new Promise((resolve, reject) => { video.onloadeddata = resolve; video.onerror = reject; });
+        video.currentTime = 0.5;
+        await new Promise(resolve => { video.onseeked = resolve; });
+        const canvas = document.createElement("canvas"); canvas.width = 160; canvas.height = 90;
+        const context = canvas.getContext("2d"); context.drawImage(video, 0, 0);
+        return Array.from(context.getImageData(0, 0, 160, 90).data).filter((_, i) => i % 4 !== 3);
+      } finally { URL.revokeObjectURL(url); }
+    }, data.toString("base64"));
+    assert.ok(pixels.reduce((a, b) => a + b, 0) > 10000, `Distorted video must not be blank (mode ${mode}, sum ${pixels.reduce((a, b) => a + b, 0)})`);
+    fingerprints.push(pixels);
+  }
+  assert.notDeepEqual(fingerprints[0], fingerprints[1], "Different effects must produce different images");
+  assert.notDeepEqual(fingerprints[0], fingerprints[2]);
+  // A one-second mono WAV: 110 Hz in the first half, silence in the second.
+  await page.locator("#soundtrack-controls summary").click();
+  const rate = 48000;
+  const wav = Buffer.alloc(44 + rate * 2);
+  wav.write("RIFF"); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8);
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(rate, 24); wav.writeUInt32LE(rate * 2, 28);
+  wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write("data", 36); wav.writeUInt32LE(rate * 2, 40);
+  for (let i = 0; i < rate / 2; i++) wav.writeInt16LE(Math.round(Math.sin(i * 2 * Math.PI * 110 / rate) * 16000), 44 + i * 2);
+  await page.locator("#audio-file").setInputFiles({ name: "pulse.wav", mimeType: "audio/wav", buffer: wav });
+  await page.getByText("pulse.wav", { exact: true }).waitFor();
+  await page.locator("#audio-duration").click();
+  assert.equal(await page.locator("#offline-duration").inputValue(), "1");
+  await page.locator("#audio-play").click();
+  await page.getByRole("button", { name: "Pause", exact: true }).waitFor();
+  await page.locator("#audio-play").click();
+  await page.locator("#audio-seek").fill("0.25");
+  // Decode the MP4 soundtrack to verify actual audio, looping, and silent tail.
+  const decode = async (data) => page.evaluate(async base64 => {
+    const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+    const context = new AudioContext();
+    try {
+      const audio = await context.decodeAudioData(bytes.buffer);
+      const pcm = audio.getChannelData(0);
+      const rms = (start, end) => {
+        const a = Math.floor(start * audio.sampleRate), b = Math.floor(end * audio.sampleRate);
+        let sum = 0; for (let i = a; i < b; i++) sum += (pcm[i] ?? 0) ** 2;
+        return Math.sqrt(sum / (b - a));
+      };
+      return { duration: audio.duration, tone: rms(0.1, 0.4), tail: rms(1.1, 1.4) };
+    } finally { await context.close(); }
+  }, data.toString("base64"));
+  for (const loop of [true, false]) {
+    await page.locator("#audio-loop").setChecked(loop);
+    const job = await call("export_video", { duration: 2, fps: 30, width: 160, height: 90 });
+    const result = await waitForExport(call, job.id);
+    assert.equal(result.status, "completed", JSON.stringify(result));
+    const data = await readFile(result.path);
+    assert.ok(data.includes(Buffer.from("soun")));
+    const decoded = await decode(data);
+    assert.ok(Math.abs(decoded.duration - 2) < 0.1, JSON.stringify(decoded));
+    assert.ok(decoded.tone > 0.2, JSON.stringify(decoded));
+    assert.ok(loop ? decoded.tail > 0.2 : decoded.tail < 0.01, JSON.stringify(decoded));
+  }
+  await page.locator("#audio-include").uncheck();
+  const silentJob = await call("export_video", { duration: 1, fps: 30, width: 160, height: 90 });
+  const silentResult = await waitForExport(call, silentJob.id);
+  assert.equal(silentResult.status, "completed");
+  assert.equal((await readFile(silentResult.path)).includes(Buffer.from("soun")), false);
+  await page.locator("#audio-include").check();
+  await page.locator("#audio-seek").fill("0");
+  const downloadReady = page.waitForEvent("download");
+  await page.locator("#rec-btn").click();
+  await page.getByRole("button", { name: "Stop", exact: true }).waitFor();
+  await page.waitForFunction(() => Number(document.querySelector("#audio-seek").value) > 0.65);
+  await page.locator("#rec-btn").click();
+  const recording = await downloadReady;
+  assert.ok((await decode(await readFile(await recording.path()))).tone > 0.2, "Live recording includes audio");
+  await page.locator("#audio-clear").click();
+  assert.equal(await page.locator("#audio-play").isDisabled(), true);
+  await call("select_scene", { sceneId: "smoke-rainbow-plumes" });
+  const fluidJob = await call("export_video", { duration: 1, fps: 30, width: 160, height: 90 });
+  assert.equal((await waitForExport(call, fluidJob.id)).status, "completed");
+  if (process.env.VJ_SCREENSHOT_PATH) await page.screenshot({ path: process.env.VJ_SCREENSHOT_PATH });
+  assert.equal((await call("get_state")).exporting, false);
+  assert.equal(await page.evaluate(() => document.querySelector("#gl-canvas").getContext("webgl2").getError()), 0);
+  assert.deepEqual(errors, []);
+});

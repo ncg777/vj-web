@@ -1,4 +1,7 @@
 import "./style.css";
+import { Soundtrack } from "./audio";
+import { Distortion } from "./distortion";
+import { createAudioPanel } from "./audio-panel";
 import vertexSource from "./shaders/fullscreen.vert?raw";
 import { animations, type AnimationConfig, type ParamSpec } from "./animations";
 import {
@@ -24,6 +27,7 @@ type StatefulResources = {
   fbos: [WebGLFramebuffer, WebGLFramebuffer];
   index: number;
   needsInit: boolean;
+  lastTime?: number;
 };
 
 const app = document.querySelector<HTMLDivElement>("#app");
@@ -52,7 +56,7 @@ app.innerHTML = `
           </div>
         </div>
         <div class="panel-section">
-          <div class="section-title">Offline Render</div>
+          <div class="section-title">Export video</div>
           <div class="offline-controls">
             <div class="offline-row">
               <label>Duration</label>
@@ -75,7 +79,7 @@ app.innerHTML = `
                 <option value="3840x2160">4K</option>
               </select>
             </div>
-            <button class="ghost small" id="offline-btn">Generate</button>
+            <button class="ghost small" id="offline-btn">Export MP4</button>
             <div class="offline-progress hidden" id="offline-progress">
               <div class="offline-progress-bar" id="offline-bar"></div>
             </div>
@@ -142,6 +146,13 @@ gl.disable(gl.DEPTH_TEST);
 gl.disable(gl.BLEND);
 
 const vao = createFullscreenTriangle(gl);
+const soundtrack = new Soundtrack();
+const distortion = new Distortion(gl, vao);
+const audioPanel = createAudioPanel(soundtrack, distortion, () => {
+  distortion.reset();
+  markStateNeedsInit(activeAnimation.id);
+  startTime = performance.now();
+});
 const programById = new Map<string, ProgramInfo>();
 const paramSpecById: Record<string, Record<string, ParamSpec>> = {};
 const stateByAnimation: Record<string, ParamValues> = {};
@@ -227,7 +238,12 @@ function updateRecordingTimer() {
   badge.textContent = `⏺ ${formatDuration(performance.now() - recordingStartTime)}`;
 }
 
-function startRecording() {
+async function startRecording() {
+  if (audioPanel.loading) { alert("Wait for soundtrack analysis to finish."); return; }
+  if (audioPanel.includeAudio && soundtrack.buffer && soundtrack.player.paused) {
+    try { await soundtrack.play(); }
+    catch (error) { alert(`Cannot play soundtrack: ${error instanceof Error ? error.message : error}`); return; }
+  }
   const mime = pickMimeType();
   if (!mime) {
     alert("Recording is not supported in this browser.");
@@ -235,6 +251,9 @@ function startRecording() {
   }
 
   const stream = canvas.captureStream(60);
+  if (audioPanel.includeAudio && soundtrack.buffer) {
+    for (const track of soundtrack.stream?.getAudioTracks() ?? []) stream.addTrack(track.clone());
+  }
   recordedChunks = [];
   mediaRecorder = new MediaRecorder(stream, {
     mimeType: mime,
@@ -255,6 +274,7 @@ function startRecording() {
     a.click();
     URL.revokeObjectURL(url);
     recordedChunks = [];
+    stream.getTracks().forEach(track => track.stop());
   };
 
   mediaRecorder.start(500); // collect data every 500ms
@@ -398,6 +418,7 @@ function markStateNeedsInit(animationId: string) {
   const state = statefulById.get(animationId);
   if (state) {
     state.needsInit = true;
+    state.lastTime = undefined;
   }
 }
 
@@ -594,6 +615,7 @@ function setActiveAnimation(id: string) {
     return;
   }
   activeAnimation = next;
+  distortion.reset();
   if (next.stateful) {
     getStateResources(next);
     markStateNeedsInit(next.id);
@@ -723,12 +745,14 @@ function applyStateUniforms(
  * The caller is responsible for setting the canvas size and calling
  * gl.viewport / gl.clear beforehand when needed.
  */
-function renderSingleFrame(
+function renderSceneFrame(
   animation: AnimationConfig,
   timeSeconds: number,
   width: number,
   height: number,
+  target: WebGLFramebuffer | null,
 ) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, target);
   const info = programById.get(animation.id);
   if (!info) return;
 
@@ -755,16 +779,19 @@ function renderSingleFrame(
       state.needsInit = false;
     }
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, nextFbo());
-    gl.viewport(0, 0, state.size, state.size);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, currentTex());
-    applyUniforms(animation, info, timeSeconds, width, height);
-    applyStateUniforms(animation, info, state, 0);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    state.index = (state.index + 1) % 2;
+    if (state.lastTime !== timeSeconds) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, nextFbo());
+      gl.viewport(0, 0, state.size, state.size);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, currentTex());
+      applyUniforms(animation, info, timeSeconds, width, height);
+      applyStateUniforms(animation, info, state, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      state.index = (state.index + 1) % 2;
+      state.lastTime = timeSeconds;
+    }
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target);
     gl.viewport(0, 0, width, height);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -785,9 +812,22 @@ function renderSingleFrame(
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 
+let previousPreviewTime = 0;
+function renderSingleFrame(animation: AnimationConfig, time: number, width: number, height: number) {
+  if (!isOfflineRendering && soundtrack.buffer && time < previousPreviewTime) {
+    markStateNeedsInit(animation.id);
+    distortion.reset();
+  }
+  if (!isOfflineRendering) previousPreviewTime = time;
+  const target = distortion.begin(width, height);
+  renderSceneFrame(animation, time, width, height, target);
+  if (target) distortion.finish(time, soundtrack.sample(time), !!soundtrack.buffer);
+}
+
 function renderFrame(now: number) {
   if (isOfflineRendering) return; // paused while offline render is running
-  const elapsed = (now - startTime) / 1000;
+  const elapsed = soundtrack.buffer ? soundtrack.player.currentTime : (now - startTime) / 1000;
+  audioPanel.update();
   const { width, height } = resizeCanvasToDisplaySize(canvas);
   renderSingleFrame(activeAnimation, elapsed, width, height);
   animationFrame = requestAnimationFrame(renderFrame);
@@ -801,9 +841,9 @@ async function runOfflineRender(
   signal?: AbortSignal,
   onProgress?: (completed: number, total: number) => void,
 ) {
-  if (isOfflineRendering || isRecording) {
+  if (isOfflineRendering || isRecording || audioPanel.loading) {
     await sink.abort();
-    throw new Error("Stop the current recording or export before exporting video.");
+    throw new Error(audioPanel.loading ? "Wait for soundtrack analysis to finish." : "Stop the current recording or export before exporting video.");
   }
   if (gl.isContextLost()) {
     await sink.abort();
@@ -814,6 +854,9 @@ async function runOfflineRender(
     await sink.abort();
     throw new Error("This scene requires floating-point WebGL render targets.");
   }
+  const wasPlaying = !!soundtrack.buffer && !soundtrack.player.paused;
+  soundtrack.player.pause();
+  distortion.reset();
   isOfflineRendering = true;
   cancelAnimationFrame(animationFrame);
   const panel = document.querySelector<HTMLElement>(".panel")!;
@@ -832,6 +875,8 @@ async function runOfflineRender(
     markStateNeedsInit(animation.id);
     await renderVideo({
       ...options, canvas, sink, signal,
+      audio: audioPanel.includeAudio ? soundtrack.buffer : undefined,
+      loopAudio: soundtrack.player.loop,
       render(time, width, height) {
         renderSingleFrame(animation, time, width, height);
         gl.finish();
@@ -855,6 +900,8 @@ async function runOfflineRender(
     panel.inert = false;
     isOfflineRendering = false;
     startTime = performance.now();
+    distortion.reset();
+    if (wasPlaying) await soundtrack.play().catch(console.error);
     animationFrame = requestAnimationFrame(renderFrame);
   }
 }
