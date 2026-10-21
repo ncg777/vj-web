@@ -1,8 +1,79 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { chromium } from "playwright";
 import { startServer, waitForExport } from "./helpers.mjs";
+
+test("interference scenes render, animate, freeze and respond to phase and seed controls", { timeout: 120_000 }, async (t) => {
+  const { call, connection } = await startServer(t);
+  const browser = await chromium.launch({
+    channel: process.env.VJ_BROWSER_CHANNEL || (process.platform === "win32" ? "msedge" : undefined),
+    headless: true, args: ["--enable-unsafe-swiftshader"],
+  });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 960, height: 640 } });
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto(connection.url);
+  await page.getByText("MCP: connected", { exact: true }).waitFor();
+  const scenes = await call("list_scenes", { query: "interference" });
+  assert.equal(scenes.length, 4);
+  const capture = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => {
+    // Sample immediately after the app's draw, before WebGL clears the drawing buffer.
+    const canvas = document.createElement("canvas");
+    canvas.width = 160; canvas.height = 120;
+    const context = canvas.getContext("2d");
+    context.drawImage(document.querySelector("#gl-canvas"), 0, 0, 160, 120);
+    resolve(Array.from(context.getImageData(0, 0, 160, 120).data).filter((_, i) => i % 4 !== 3));
+  })));
+  const difference = (a, b) => a.reduce((sum, value, i) => sum + Math.abs(value - b[i]), 0) / a.length;
+  const fingerprints = [];
+  for (const { id: sceneId, requiresFloatTargets } of scenes) {
+    assert.equal(requiresFloatTargets, false);
+    // Exercise scene discovery in the picker as well as the remote control path.
+    await page.locator("#scene-list").selectOption(sceneId);
+    assert.equal((await call("get_state")).sceneId, sceneId);
+    await call("set_parameters", { sceneId, values: { speed: 0, seed: 123 } });
+    const frozen = await capture();
+    assert.ok(Math.max(...frozen) - Math.min(...frozen) > 60, `${sceneId} must contain visible fringes`);
+    assert.deepEqual(await capture(), frozen, `${sceneId} must freeze at speed zero`);
+    fingerprints.push(frozen);
+    if (process.env.VJ_INTERFERENCE_PREVIEW_DIR) {
+      const data = await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => {
+        resolve(document.querySelector("#gl-canvas").toDataURL("image/png").split(",")[1]);
+      })));
+      await writeFile(join(process.env.VJ_INTERFERENCE_PREVIEW_DIR, `${sceneId}.png`), Buffer.from(data, "base64"));
+    }
+    await call("set_parameters", { sceneId, values: { phase: 1.7 } });
+    assert.ok(difference(frozen, await capture()) > 1, `${sceneId} must respond to relative phase`);
+    await call("set_parameters", { sceneId, values: { phase: 0, seed: 456 } });
+    assert.ok(difference(frozen, await capture()) > 1, `${sceneId} must respond to reseeding`);
+    await call("set_parameters", { sceneId, values: { seed: 123 } });
+    assert.deepEqual(await capture(), frozen, `${sceneId} must reproduce a seed`);
+    await call("set_parameters", { sceneId, values: { speed: 1 } });
+    const moving = await capture();
+    await page.evaluate(() => new Promise(resolve => {
+      let count = 0;
+      const tick = () => ++count === 6 ? resolve() : requestAnimationFrame(tick);
+      requestAnimationFrame(tick);
+    }));
+    assert.ok(difference(moving, await capture()) > 0.1, `${sceneId} must animate`);
+    await page.getByRole("button", { name: "Reset", exact: true }).click();
+    assert.equal((await call("get_state")).values.phase, 0);
+    assert.equal(await page.evaluate(() => document.querySelector("#gl-canvas").getContext("webgl2").getError()), 0);
+  }
+  for (let i = 0; i < fingerprints.length; i++) {
+    for (let j = i + 1; j < fingerprints.length; j++) {
+      assert.ok(difference(fingerprints[i], fingerprints[j]) > 5, "Each interference scene must look distinct");
+    }
+  }
+  const job = await call("export_video", { duration: 1, fps: 30, width: 320, height: 180 });
+  const result = await waitForExport(call, job.id);
+  assert.equal(result.status, "completed", JSON.stringify(result));
+  assert.ok(result.bytes > 1024);
+  assert.deepEqual(errors, []);
+});
 
 test("real browser controls scenes and exports a playable MP4 without a save dialog", { timeout: 120_000 }, async (t) => {
   const { client, call, connection, directory } = await startServer(t);

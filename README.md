@@ -173,6 +173,22 @@ lit edges. These are gas-advection visual simulations with prescribed curl flow
 and density-driven buoyancy, rather than full Navier–Stokes solvers. They require
 WebGL2 floating-point render targets, like the existing fluid scenes.
 
+## Interference patterns
+
+Four scenes explore animated wave superposition: **Interference Ripple Duet**
+combines two orbiting circular sources, **Interference Moiré Weave** overlaps
+rotating line gratings, **Interference Spectral Slits** sums a phased row of
+two to eight sources, and **Interference Standing Lattice** mixes crossed
+standing waves into Chladni-inspired nodal patterns.
+
+Adjust wave frequency, scale, relative phase, pattern motion, fringe contrast,
+hue, and glow. Each scene also has controls for its source spacing, grating
+angle/mismatch, slit count, or standing-wave modes. Animation Speed at zero
+freezes the entire scene; Pattern Motion at zero holds the geometry while
+the waves continue. Reseed changes the composition. The scenes support the
+existing distortion, soundtrack, recording, and MP4 export controls and do not
+require floating-point render targets.
+
 ## Kaleidoscopic fluids
 
 Four scenes—Fluid Vortex Mandala, Fluid Prismatic Ribbons, Fluid Cellular Jewel,
